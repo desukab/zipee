@@ -112,12 +112,34 @@ jobs:
           set -e
           test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
 
-      - name: Verify the CLI is reproducible across the run
+      - name: Verify archives carry identical contents across builds
+        # NOT a byte-for-byte comparison. A ZIP stores a modification time per
+        # member, so two archives built seconds apart differ in bytes even
+        # when their contents are identical. Zipee deliberately preserves
+        # source timestamps -- that is more useful than byte-reproducibility --
+        # so the property worth asserting is that the *contents* match.
         run: |
           set -euo pipefail
           work="$(mktemp -d)"
-          mkdir -p "$work/src"
+          mkdir -p "$work/src/nested"
           echo deterministic > "$work/src/file.txt"
-          a=$(./target/release/zipee create "$work/a.zip" "$work/src"; sha256sum "$work/a.zip" | cut -d' ' -f1)
-          b=$(./target/release/zipee create "$work/b.zip" "$work/src"; sha256sum "$work/b.zip" | cut -d' ' -f1)
-          test "$a" = "$b" || { echo "archives are not reproducible: $a vs $b"; exit 1; }
+          head -c 20000 /dev/urandom > "$work/src/nested/blob.bin"
+
+          ./target/release/zipee create "$work/a.zip" "$work/src"
+          sleep 2
+          ./target/release/zipee create "$work/b.zip" "$work/src"
+
+          mkdir -p "$work/out-a" "$work/out-b"
+          ./target/release/zipee extract "$work/a.zip" -d "$work/out-a" >/dev/null
+          ./target/release/zipee extract "$work/b.zip" -d "$work/out-b" >/dev/null
+
+          diff -r "$work/out-a" "$work/out-b" \
+            || { echo "extracted contents differ between builds"; exit 1; }
+
+          # And the member lists must agree exactly, names included.
+          ./target/release/zipee list "$work/a.zip" > "$work/list-a"
+          ./target/release/zipee list "$work/b.zip" > "$work/list-b"
+          diff "$work/list-a" "$work/list-b" \
+            || { echo "member listings differ between builds"; exit 1; }
+
+          echo "contents and listings are identical across builds"
