@@ -112,20 +112,39 @@ XAR container this engine identifies correctly.
 
 | Feature | Status | Notes |
 |---|---|---|
-| SwiftUI browser window | **Unverified** | Source written, never compiled |
-| Index built off the main thread | **Unverified** | |
-| Finder "Open With" | **Unverified** | `CFBundleDocumentTypes`, all `LSHandlerRank = Alternate` |
-| Finder Services menu | **Unverified** | `NSServices` → `extractArchives` |
-| Drag archives onto the window | **Unverified** | |
+| SwiftUI sources compile | **Done** | `swiftc -warnings-as-errors`, both runners |
+| `.pkg` builds | **Done** | `pkgbuild`, verified with `xar -tf` + `pkgutil --expand-full` |
+| `.pkg` installs | **Done** | `installer: The install was successful.` on macOS 14 and 15 |
+| App binary is a universal Mach-O | **Done** | `Mach-O universal binary with 2 architectures` |
+| Bundle identifier / deployment target | **Done** | Read back from the *installed* bundle |
+| **App launches and renders** | **NOT VERIFIED** | No GUI session on a runner |
+| **Finder "Open With"** | **NOT VERIFIED** | `CFBundleDocumentTypes` declared, all `LSHandlerRank = Alternate` |
+| **Finder Services menu** | **NOT VERIFIED** | `NSServices` → `extractArchives` declared |
+| **Drag archives onto the window** | **NOT VERIFIED** | |
 | Reveal in Finder | **Planned** | Entitlement requested, code not written |
 | Quick Look previews | **Planned** | |
-| Sandbox | **Unverified** | Seven entitlements, each documented with a reason |
-| `.pkg` installer | **Unverified** | Script written, never executed |
-| Code signing | **Not doing** | No Developer ID credentials available |
+| Sandbox entitlements applied | **NOT VERIFIED** | Seven declared; unsigned builds do not enforce them |
+| Code signing | **Not doing** | No Developer ID credentials exist here |
 | Notarization | **Not doing** | Requires signing first |
-| Genuine filesystem mount | **Not doing** | Requires the restricted `com.apple.developer.fskit.fsmodule` entitlement |
+| Genuine filesystem mount | **Not doing** | Read-only adapter exists and is tested; no platform backend. See [mounting-feasibility.md](mounting-feasibility.md) |
 | Finder Sync badges | **Planned** | |
 | Touch Bar / menu bar extras | **Not doing** | No demonstrated value |
+
+### The read-only filesystem adapter
+
+`crates/zipee-engine/src/fs_adapter.rs` exists, is platform-agnostic, and is
+tested on Linux. It is the surface a mount backend implements.
+
+| Operation | Status | Notes |
+|---|---|---|
+| `lookup` | **Done** | Caller spelling normalised; root always resolves |
+| `read_dir` | **Done** | Final component only, directories first |
+| `read_file` | **Done** | Ranged reads clamp at EOF; CRC verified |
+| `size_of` | **Done** | From the index, no decompression |
+| `is_cancelled` | **Done** | Stops every operation, so an unmount never waits on a read |
+| Escape refusal (`..`) | **Done** | Never resolved, always refused |
+| Typed errors | **Done** | `FsError` → `io::ErrorKind` mapping |
+| Platform backend (FSKit / macFUSE) | **Not doing** | Gated on a licensing answer and an Apple capability request |
 
 ## Performance
 
@@ -157,13 +176,14 @@ Startup latency of the **app**, idle CPU, and memory at rest are **unmeasured**
 
 ## Test counts
 
-| Suite | Tests |
-|---|---|
-| Unit (`zipee-engine` lib) | 72 |
-| Security (`tests/security.rs`) | 32 |
-| Doc-tests | 1 |
-| **Total** | **105** |
+| Suite | Tests | Where run |
+|---|---|---|
+| Unit (`zipee-engine` lib) | 88 | Linux + macOS |
+| Security (`tests/security.rs`) | 32 | Linux + macOS |
+| Doc-tests | 1 | Linux + macOS |
+| **Total** | **121** | |
 
 Plus two CI-only checks: a CLI end-to-end job asserting the exit-code contract
-and archive reproducibility, and a macOS job that builds, installs and launches
-the app.
+and archive reproducibility, and a macOS job that compiles the app, packages
+it, installs the package on the runner, and re-inspects the installed bundle.
+

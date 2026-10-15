@@ -19,21 +19,28 @@ zipee edit notes.zip -o fixed.zip --delete old.txt --rename a.txt=archive/a.txt
 
 ## Status — read this first
 
-**The archive engine is complete and tested. The macOS app is written but has
-never been compiled.**
+**The archive engine is complete and tested. The macOS app compiles, packages
+and installs. It has never been launched.**
 
-This repository was built on an Ubuntu host with no Xcode and no macOS. That
-means:
+Interactive work happens on Ubuntu; builds and tests run on GitHub's macOS
+runners. Measured evidence:
 
-- ✅ **105 tests pass**, including 32 adversarial security tests — verified here
-- ✅ **The CLI works end to end** on real archives — verified here
-- ❌ **The Swift sources have not been type-checked**
-- ❌ **No `.app` and no `.pkg` have been built** — this is impossible without macOS
+- ✅ **121 tests pass**, including 32 adversarial security tests — on Linux *and* macOS
+- ✅ **The CLI works end to end** on real archives
+- ✅ **The Swift sources compile** with `-warnings-as-errors`, on macOS 14.8.9 and 15.7.9
+- ✅ **`Zipee-0.1.0-macOS.pkg` builds** and **installs** on both runners
+  (`installer: The install was successful.`)
+- ✅ **The app binary is a universal Mach-O** (`x86_64` + `arm64`), min macOS 14.0
+- ❌ **The app has never been launched** — a runner has no GUI session
 - ❌ **Finder integration has not been exercised**
+- ❌ **The package is unsigned and un-notarised**, so Gatekeeper refuses it
+- ❌ **No filesystem mount exists** — see [mounting-feasibility.md](docs/mounting-feasibility.md)
 
 [`docs/platform-limitations.md`](docs/platform-limitations.md) lists every
-unverified claim, the measured performance numbers, and the specific Swift risks
-that a compiler would catch.
+unverified claim, the thirteen defects only running on macOS could find, and
+the measured performance numbers.
+[`docs/mounting-feasibility.md`](docs/mounting-feasibility.md) is the evidence
+behind the decision not to fake a mount.
 
 Nothing in this repository is described as working on macOS until it has been.
 
