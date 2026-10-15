@@ -217,7 +217,37 @@ comparisons at 20,000 members). Adding a name→index map, built once per open,
 took it to **0.35 s**: a 139× improvement. `reading_every_member_of_a_large_archive_stays_linear`
 guards it.
 
-## 11. The highest-priority unverified item
+## 11. Mounting: the recommendation changed
+
+This document and `docs/architecture.md` originally ruled out macFUSE because it
+"ships a kext, requires a reboot and breaks on macOS updates". That is now
+known to be outdated:
+
+- **macFUSE 5.2.0** (2026-04-09) introduced `MFMount.framework`, an open API
+  for mounting volumes through Apple's FSKit backend, explicitly to enable
+  *fully sandboxed* file systems that previously were not possible.
+- **macFUSE 5.4.0** (2026-09-07) supports macOS 26 that way with **no kernel
+  extension**, requiring no Recovery Mode change.
+- All official releases are **signed and notarized by Apple**, so Gatekeeper and
+  SIP are satisfied without user exceptions.
+- The legacy kext backend still exists and can still be selected, but nothing
+  requires it.
+
+**Status: unmounted-by-default is no longer forced by the technology.** Zipee can
+ship a genuine mount by depending on macFUSE, or by applying for the
+`com.apple.developer.fskit.fsmodule` managed capability from Apple.
+
+Not yet done: the mount layer is not written. The engine already exposes
+everything it would need (`Vfs`, `read_entry`, `ExtractionBudget`,
+`sanitize_member_path`), and macFUSE requires per-operation callbacks, which map
+onto `read_entry` cleanly — the write path additionally needs
+`writeback::MemberEdit`.
+
+Licensing needs checking before linking: `libfuse` itself is BSD, but
+`MFMount.framework` is new and its licence is not yet confirmed. The macFUSE
+kernel extension is closed source, though that is no longer the path.
+
+## 12. The highest-priority unverified item
 
 Run `scripts/build-macos.sh` on a Mac. Everything above the Swift layer is
 verified; everything below it is not. A single `swiftc` run would convert the

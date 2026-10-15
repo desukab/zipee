@@ -42,7 +42,7 @@ The alternatives, honestly assessed:
 |---|---|
 | **FSKit `FSModule`** | The right API. **Blocked**: needs an Apple-granted entitlement. |
 | **FileProvider file-system extension** | Also an entitlement (`com.apple.developer.fileprovider.testing-mode` for the non-App-Store path), and URL-based, which is the wrong model for a seekable ZIP. |
-| **macFUSE** | Works, but ships a kext: requires a system-extension install, triggers a reboot, and breaks on every macOS security update. Unacceptable as a default for a consumer utility. |
+| **macFUSE 5.2+ (`MFMount.framework`)** | **Viable.** Its FSKit backend mounts volumes entirely in user space on macOS 26+, with no kernel extension and no Recovery Mode step. Official releases are signed and notarized by Apple. It is a separate user-installed component, so Zipee must detect its absence and degrade to in-app browsing. |
 | **`diskdev-helper` / Disk Arbitration** | Deprecated; Apple no longer offers it to new apps. |
 | **Browse in-app (chosen)** | No entitlement, no installer, no kext, no reboot. Works on any macOS Zipee supports. |
 
@@ -72,12 +72,36 @@ mount cannot easily give:
   [`sanitize_member_path`](../crates/zipee-engine/src/security.rs) before any
   filesystem call, and that is provable by test rather than by review.
 
+**Correction to an earlier draft of this document.** It originally dismissed
+macFUSE as "ships a kext, triggers a reboot, breaks on every macOS security
+update." That is outdated and wrong. As of macFUSE 5.2.0 (April 2026) the
+project ships `MFMount.framework`, an open API for mounting volumes through the
+FSKit backend, and 5.4.0 (September 2026) supports macOS 26 that way with no
+kernel extension at all. Those releases are notarized by Apple, so Gatekeeper
+is satisfied without exceptions. A third-party kext is still the *legacy*
+backend and can still be selected, but nothing forces it.
+
+That materially changes the recommendation. A genuine mount is reachable for
+Zipee by two routes:
+
+1. **Depend on macFUSE's FSKit backend.** No restricted entitlement needed.
+   Costs a separate user-installed component, so Zipee must detect its absence
+   and degrade to in-app browsing rather than fail.
+2. **Request `com.apple.developer.fskit.fsmodule` from Apple.** It is a managed
+   capability — requested through Certificates, Identifiers & Profiles → App
+   ID → Capability Requests. This is the route Zipgeist evidently took (its
+   profile is a `Mac Team Direct Provisioning Profile` carrying exactly that
+   entitlement). Full control, but gated on Apple's approval.
+
+Route 1 is the one Zipee should ship, because it works today without anyone's
+permission. Route 2 is worth applying for in parallel.
+
 **The honest position:** Zipee gives up "it looks exactly like a folder in
-Finder" and buys correctness, permissions you can reason about, and an
-installer that does nothing scary. If Zipee ever gains the FSKit entitlement,
-layer 3 is an additive feature over the same engine — the index, the readers
-and the safety layer are all reusable. That is why the engine is a separate
-library with no macOS dependency.
+Finder" *by default*, and buys correctness, a single safety choke point, and an
+installer that does nothing scary. If either mount route lands, layer 3 is an
+additive feature over the same engine — the index, the readers and the safety
+layer are all reusable, and they are already tested. That is why the engine is a
+separate library with no macOS dependency.
 
 ---
 

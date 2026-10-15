@@ -50,9 +50,15 @@ There are four things people conflate when they say "it mounts archives":
 | 3. Mount an archive as a real filesystem volume | ❌ Zipee does not |
 | 4. Write changes back to a mounted archive | ❌ Zipee edits via `zipee edit` instead |
 
-Layers 3 and 4 require Apple's **FSKit**, and FSKit requires the restricted
-`com.apple.developer.fskit.fsmodule` entitlement, which Apple grants to approved
-developers. Zipee is an independent project and does not assume it.
+Layers 3 and 4 require Apple's **FSKit**. FSKit needs the restricted
+`com.apple.developer.fskit.fsmodule` entitlement — which *is* obtainable as an
+Apple managed capability, and which Zipgeist evidently holds. But there is a
+second route that needs nobody's permission: **macFUSE 5.2+ ships an FSKit
+backend that mounts volumes entirely in user space**, with no kext, no Recovery
+Mode, notarized by Apple.
+
+So a real mount is reachable for Zipee. It is simply not built yet, and in-app
+browsing is what ships in the meantime.
 
 This is a deliberate trade, not a gap. A real mount costs a kext or a restricted
 entitlement, and — as the competitor product's own strings admit — files dragged
