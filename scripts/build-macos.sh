@@ -280,11 +280,13 @@ if [[ -z "$EXECUTABLE_FOUND" ]]; then
   find "$BUILD_DIR/pkg-expanded" -maxdepth 4 | head -30 | sed 's/^/    /' >&2
   die "the expanded package contains no $APP_NAME executable"
 fi
-[[ -f "$EXECUTABLE_FOUND/Contents/Info.plist" ]] \
-  || die "the executable found in the package has no Info.plist"
-log "payload: ${EXECUTABLE_FOUND#$BUILD_DIR/pkg-expanded/}"
-"$EXECUTABLE_FOUND/Contents/MacOS/$APP_NAME" --version >/dev/null 2>&1 \
-  || warn "the packaged executable did not respond to --version (expected for an unsigned bundle)"
+# The find yields the binary itself (.../Zipee.app/Contents/MacOS/Zipee), so
+# the bundle's Contents directory is two levels up -- not one.
+BUNDLE_CONTENTS="$(cd "$(dirname "$EXECUTABLE_FOUND")/.." && pwd)"
+[[ -f "$BUNDLE_CONTENTS/Info.plist" ]] \
+  || die "the executable found in the package has no Info.plist beside it"
+BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$BUNDLE_CONTENTS/Info.plist")"
+log "payload: ${EXECUTABLE_FOUND#$BUILD_DIR/pkg-expanded/} (bundle id $BUNDLE_ID)"
 pkgutil --flatten "$BUILD_DIR/pkg-expanded" "$BUILD_DIR/flattened.pkg" >/dev/null
 
 DEPLOYMENT_TARGET="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$CONTENTS/Info.plist")"

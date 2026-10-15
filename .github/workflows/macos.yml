@@ -158,8 +158,11 @@ jobs:
 
       - name: Upload the package
         # `always()` so a failure after packaging still yields the artifact,
-        # which is how the remaining defects get diagnosed at all.
+        # and `continue-on-error` because a private repository's artifact
+        # storage quota is finite -- an exhausted quota must not mask the real
+        # build result.
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Zipee-macOS-pkg
