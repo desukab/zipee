@@ -140,14 +140,32 @@ jobs:
           # Installing and actually starting the app is the only way to know
           # the bundle is not subtly broken.
           sudo installer -pkg "$pkg" -target /
-          ls -d /Applications/Zipee.app
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Zipee.app/Contents/Info.plist
+
+          # Do not assume where the payload landed. On macos-14 `installer`
+          # reported success but /Applications/Zipee.app was absent, so the
+          # bundle is located and the search path reported rather than guessed.
+          app=""
+          for candidate in /Applications/Zipee.app "$HOME/Applications/Zipee.app"; do
+            if [[ -d "$candidate" ]]; then app="$candidate"; break; fi
+          done
+          if [[ -z "$app" ]]; then
+            app="$(find /Applications "$HOME/Applications" / -maxdepth 4 -name 'Zipee.app' -type d 2>/dev/null | head -1)"
+          fi
+          if [[ -z "$app" || ! -d "$app" ]]; then
+            echo "::error::installer reported success but no Zipee.app was found"
+            echo "payload receipt:"; cat /var/db/receipts/*Zipee* 2>/dev/null || true
+            echo "searching the whole filesystem..."
+            find / -name 'Zipee.app' -maxdepth 6 -type d 2>/dev/null || true
+            exit 1
+          fi
+          echo "installed at: $app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist"
           # An unsigned bundle cannot verify. That is the expected state of a
           # credential-free build, so it is reported and not treated as a
           # failure of the step.
-          if ! codesign --verify --deep --strict /Applications/Zipee.app 2>&1; then
+          if ! codesign --verify --deep --strict "$app" 2>&1; then
             echo "unsigned build: codesign verification failed, as expected without a Developer ID"
-            codesign --display --verbose=2 /Applications/Zipee.app 2>&1 | head -5 || true
+            codesign --display --verbose=2 "$app" 2>&1 | head -5 || true
           fi
           # Prove the bundle is structurally whole and the engine is linked in.
           #
@@ -157,7 +175,7 @@ jobs:
           # much output the tool produced, which is why macos-15 passed and
           # macos-14 did not -- a timing-dependent failure is exactly the kind
           # that hides a real problem.
-          exe=/Applications/Zipee.app/Contents/MacOS/Zipee
+          exe="$app/Contents/MacOS/Zipee"
           /usr/bin/file -b "$exe"
           otool_out="$(/usr/bin/otool -L "$exe")"
           printf '%s\n' "$otool_out" | sed -n '1,5p'
