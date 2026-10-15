@@ -30,11 +30,14 @@ struct ZipeeApp: App {
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in
                     handleDrop(providers)
                 }
+                // The sheet hangs off the content view, not off the Window.
+                // `sheet` is a View modifier; `WindowGroup` is a Scene, and
+                // Scenes have no `sheet` member.
+                .sheet(isPresented: $isShowingAbout) {
+                    AboutView()
+                }
         }
         .defaultSize(width: 1000, height: 620)
-        .sheet(isPresented: $isShowingAbout) {
-            AboutView()
-        }
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Archive…") { presentOpenPanel() }
