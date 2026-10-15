@@ -121,6 +121,49 @@ mod integration_smoke {
     }
 
     #[test]
+    fn reading_every_member_of_a_large_archive_stays_linear() {
+        // Regression test. `read_entry` used to scan the central directory
+        // linearly, which made reading every member O(N^2) — on a 20,000-entry
+        // archive a full verify took 48.7s before the name index and 0.35s
+        // after (see docs/platform-limitations.md). This asserts correctness on
+        // every member; the quadratic regression would show up as a suite that
+        // crawls, which is just as visible and far less flaky than a timer.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("many.zip");
+        {
+            let file = File::create(&p).unwrap();
+            let mut w = zip::ZipWriter::new(std::io::BufWriter::new(file));
+            let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            for i in 0..5_000u32 {
+                w.start_file(format!("d{}/f{i:05}.txt", i % 50), opts)
+                    .unwrap();
+                w.write_all(format!("body-{i}").as_bytes()).unwrap();
+            }
+            w.finish().unwrap();
+        }
+
+        let mut a = open_any(&p).unwrap();
+        assert_eq!(a.entries().unwrap().len(), 5_000);
+
+        for i in 0..5_000u32 {
+            let name = format!("d{}/f{i:05}.txt", i % 50);
+            let data = a.read_entry(&name, &mut NoPassword).unwrap();
+            assert_eq!(
+                data,
+                format!("body-{i}").as_bytes(),
+                "wrong body for {name}"
+            );
+        }
+
+        // An unknown name must be reported, not panic.
+        assert!(matches!(
+            a.read_entry("nope.txt", &mut NoPassword),
+            Err(Error::NoSuchEntry(_))
+        ));
+    }
+
+    #[test]
     fn identifies_by_content() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("mislabelled.png");
