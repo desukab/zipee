@@ -150,9 +150,18 @@ jobs:
             codesign --display --verbose=2 /Applications/Zipee.app 2>&1 | head -5 || true
           fi
           # Prove the bundle is structurally whole and the engine is linked in.
-          /usr/bin/file -b /Applications/Zipee.app/Contents/MacOS/Zipee
-          /usr/bin/otool -L /Applications/Zipee.app/Contents/MacOS/Zipee | head -5
-          echo "step complete" 
+          #
+          # Capture first, then truncate. Under `set -o pipefail`, a producer
+          # killed by SIGPIPE when `head` exits early makes the whole pipeline
+          # non-zero and fails the step. Whether that happens depends on how
+          # much output the tool produced, which is why macos-15 passed and
+          # macos-14 did not -- a timing-dependent failure is exactly the kind
+          # that hides a real problem.
+          exe=/Applications/Zipee.app/Contents/MacOS/Zipee
+          /usr/bin/file -b "$exe"
+          otool_out="$(/usr/bin/otool -L "$exe")"
+          printf '%s\n' "$otool_out" | sed -n '1,5p'
+          echo "step complete"
 
       - name: Run the CLI that ships in the engine
         run: |
