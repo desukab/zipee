@@ -209,8 +209,15 @@ jobs:
           EXPECTED: "2EJyURV4HhJNFas4V3cJtB1BqvMnDaPhqcxu5yiSkAxG"
         run: |
           set -euo pipefail
+          # pillow is named explicitly: `qrcode` is already present on the
+          # runner image, so pip treats it as satisfied and never installs the
+          # imaging dependency that qrcode.make_image() imports at call time.
+          # Installing it by name is the difference between "installed" and
+          # "actually usable".
           python3 -m pip install --quiet --break-system-packages \
-            qrcode opencv-python-headless numpy
+            pillow qrcode opencv-python-headless numpy
+          python3 -c "import PIL, qrcode, cv2, numpy" \
+            || { echo "::error::a required QR verification module is missing"; exit 1; }
           python3 - <<'PY'
           import os, qrcode, cv2, numpy as np
           expected = os.environ["EXPECTED"]
