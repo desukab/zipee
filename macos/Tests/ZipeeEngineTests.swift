@@ -179,7 +179,7 @@ final class ReadTests: XCTestCase {
         let entries = try archive.entries()
         XCTAssertEqual(entries.count, 3)
         XCTAssertEqual(
-            Set(entries.map(\\.rawName)),
+            Set(entries.map(\.rawName)),
             ["readme.md", "docs/guide.txt", "docs/img/logo.png"])
 
         let stats = archive.stats()

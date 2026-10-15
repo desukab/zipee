@@ -232,9 +232,13 @@ if [[ "$SKIP_TESTS" -eq 0 ]]; then
   # "cannot find XCTAssert... in scope". Point at the module explicitly.
   XCTEST_PLATFORM="$(xcrun --show-sdk-platform-path)"
   XCTEST_FRAMEWORKS="$XCTEST_PLATFORM/Developer/Library/Frameworks"
-  XCTEST_MODULE="$(find "$XCTEST_PLATFORM/Developer" -maxdepth 4 -name 'XCTest.swiftmodule' -print -quit 2>/dev/null || true)"
-  [[ -n "$XCTEST_MODULE" ]] || die "cannot locate XCTest.swiftmodule under $XCTEST_PLATFORM/Developer"
-  XCTEST_MODULE_DIR="$(dirname "$XCTEST_MODULE")"
+  # Derive the module directory from the *same* platform path rather than
+  # searching: runners carry more than one Xcode, and a bare `find` picks
+  # whichever comes first alphabetically -- which on a macOS 14 runner is
+  # Xcode 15.4, not the 16.4 that xcrun just selected.
+  XCTEST_MODULE_DIR="$XCTEST_PLATFORM/Developer/usr/lib"
+  [[ -e "$XCTEST_MODULE_DIR/XCTest.swiftmodule" ]] \
+    || die "no XCTest.swiftmodule at $XCTEST_MODULE_DIR (platform: $XCTEST_PLATFORM)"
   log "  XCTest framework: $XCTEST_FRAMEWORKS"
   log "  XCTest module:    $XCTEST_MODULE_DIR"
   TEST_BIN="$BUILD_DIR/ZipeeEngineTests"
