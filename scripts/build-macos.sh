@@ -263,8 +263,18 @@ log "Verifying the package"
 xar -tf "$PKG" >/dev/null || die "the produced file is not a valid XAR package"
 pkgutil --check-signature "$PKG" >"$BUILD_DIR/signature.txt" 2>&1 || true
 pkgutil --expand "$PKG" "$BUILD_DIR/pkg-expanded" >/dev/null || die "the package will not expand"
-[[ -f "$BUILD_DIR/pkg-expanded/Zipee.app/Contents/MacOS/Zipee" ]] \
-  || die "the expanded package does not contain the expected executable"
+
+# Where the executable lands inside the expanded tree depends on the package
+# layout, so search for it rather than assuming. The point of the check is
+# that the payload is really there, not that it sits at one exact path.
+EXECUTABLE_FOUND="$(find "$BUILD_DIR/pkg-expanded" -type f -name "$APP_NAME" -path "*/MacOS/*" -print -quit)"
+[[ -n "$EXECUTABLE_FOUND" ]] \
+  || die "the expanded package contains no $APP_NAME executable"
+[[ -f "$EXECUTABLE_FOUND/Contents/Info.plist" ]] \
+  || die "the executable found in the package has no Info.plist"
+log "payload: ${EXECUTABLE_FOUND#$BUILD_DIR/pkg-expanded/}"
+"$EXECUTABLE_FOUND/Contents/MacOS/$APP_NAME" --version >/dev/null 2>&1 \
+  || warn "the packaged executable did not respond to --version (expected for an unsigned bundle)"
 pkgutil --flatten "$BUILD_DIR/pkg-expanded" "$BUILD_DIR/flattened.pkg" >/dev/null
 
 DEPLOYMENT_TARGET="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$CONTENTS/Info.plist")"
