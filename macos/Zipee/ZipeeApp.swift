@@ -15,6 +15,7 @@ import AppKit
 struct ZipeeApp: App {
     @StateObject private var session = ArchiveSession()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var isShowingAbout = false
 
     var body: some Scene {
         Window("Zipee", id: "main") {
@@ -31,6 +32,9 @@ struct ZipeeApp: App {
                 }
         }
         .defaultSize(width: 1000, height: 620)
+        .sheet(isPresented: $isShowingAbout) {
+            AboutView()
+        }
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Open Archive…") { presentOpenPanel() }
@@ -41,6 +45,16 @@ struct ZipeeApp: App {
                 Button("Close Archive") { session.close() }
                     .keyboardShortcut("w", modifiers: .command)
                     .disabled(session.archive == nil)
+            }
+            // The donation entry point. One action, in the Help menu, where
+            // someone who already values the app will look for it. Never a
+            // launch prompt, never a nag, never tied to any feature.
+            CommandGroup(replacing: .appInfo) {
+                Button("About Zipee") { isShowingAbout = true }
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Support Development…") { isShowingAbout = true }
+                    .help("Zipee is free and open-source. Donating is optional.")
             }
         }
     }

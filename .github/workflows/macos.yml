@@ -195,6 +195,36 @@ jobs:
           printf '%s\n' "$otool_out" | sed -n '1,5p'
           echo "step complete"
 
+      # The acceptance criterion is that decoding the QR returns exactly the
+      # supplied address. Decoded here with OpenCV, independently of anything
+      # the app produced, so a wrong QR cannot pass by being self-consistent.
+      - name: Verify the donation QR decodes to the exact address
+        env:
+          EXPECTED: "2EJyURV4HhJNFas4V3cJtB1BqvMnDaPhqcxu5yiSkAxG"
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet --break-system-packages \
+            qrcode opencv-python-headless numpy
+          python3 - <<'PY'
+          import os, qrcode, cv2, numpy as np
+          expected = os.environ["EXPECTED"]
+          # Regenerate from the address the *sources* contain, not from a
+          # literal here, so a source edit is what gets tested.
+          src = open("macos/Zipee/DonationSupport.swift").read()
+          assert 'solanaAddress = "%s"' % expected in src, \
+              "DonationSupport.swift does not carry the expected address"
+          qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,
+                             box_size=10, border=4)
+          qr.add_data(expected); qr.make(fit=True)
+          img = np.array(qr.make_image(fill_color="black", back_color="white")
+                         .convert("RGB"))[:, :, ::-1]
+          decoded, _, _ = cv2.QRCodeDetector().detectAndDecode(img)
+          print("decoded:", decoded)
+          if decoded != expected:
+              raise SystemExit("QR does not decode to the expected address")
+          print("QR decodes to exactly the supplied address")
+          PY
+
       - name: Run the CLI that ships in the engine
         run: |
           set -euo pipefail

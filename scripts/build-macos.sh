@@ -217,6 +217,54 @@ else
   cp "${APP_SLICES[0]}" "$CONTENTS/MacOS/$APP_NAME"
 fi
 
+# --- Swift tests -------------------------------------------------------------
+#
+# The Rust suite proves the engine; it cannot prove the Swift wrapper. These
+# tests exercise the C ABI through Swift, so a wrong struct layout, a missed
+# `zipee_bytes_free` or a mistyped error would fail here and nowhere else.
+
+if [[ "$SKIP_TESTS" -eq 0 ]]; then
+  log "Running the Swift test suite"
+  XCTEST_FRAMEWORKS="$(xcrun --show-sdk-platform-path)/Developer/Library/Frameworks"
+  TEST_BIN="$BUILD_DIR/ZipeeEngineTests"
+
+  # The app sources minus the @main entry point, which a test executable must
+  # not contain: the suite supplies its own `main` via XCTMain.
+  LIB_SOURCES=()
+  while IFS= read -r line; do
+    LIB_SOURCES+=("$line")
+  done < <(find "$REPO_ROOT/macos/Zipee" -name '*.swift' ! -name 'ZipeeApp.swift' | sort)
+
+  TEST_SOURCES=()
+  while IFS= read -r line; do
+    TEST_SOURCES+=("$line")
+  done < <(find "$REPO_ROOT/macos/Tests" -name '*.swift' | sort)
+
+  for arch in "${WANT_ARCHS[@]}"; do
+    xcrun swiftc \
+      -target "${arch}-apple-macos${DEPLOYMENT_TARGET_NUMBER}" \
+      -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+      -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
+      -I "$XCTEST_FRAMEWORKS" -F "$XCTEST_FRAMEWORKS" \
+      -L "$BUILD_DIR" -lzipee_engine \
+      -framework XCTest -framework AppKit -framework SwiftUI -framework CoreImage \
+      -lz -lbz2 -liconv \
+      -Xlinker -force_load -Xlinker "$LIB" \
+      -Xlinker -rpath -Xlinker "$XCTEST_FRAMEWORKS" \
+      -Xlinker -rpath -Xlinker /usr/lib/swift \
+      -warnings-as-errors \
+      -o "$TEST_BIN-$arch" \
+      "${LIB_SOURCES[@]}" "${TEST_SOURCES[@]}" \
+      || die "swiftc failed building the test suite for $arch"
+
+    log "  running Swift tests ($arch)"
+    "$TEST_BIN-$arch" || die "Swift tests failed on $arch"
+  done
+  log "Swift tests passed on: ${WANT_ARCHS[*]}"
+else
+  warn "skipping the Swift tests because --skip-tests was passed"
+fi
+
 # Prove the binary exists and is a Mach-O before packaging anything. A silent
 # empty executable would otherwise reach the package.
 [[ -f "$CONTENTS/MacOS/$APP_NAME" ]] || die "swiftc produced no executable at $CONTENTS/MacOS/$APP_NAME"
