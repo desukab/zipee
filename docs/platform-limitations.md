@@ -47,6 +47,32 @@ Runner matrix used:
 | `macos-15` | macOS 15.7.9 (24G830) | 16.4 | MacOSX15.5.sdk |
 | `macos-14` | macOS 14.8.9 (23J631) | 15.4 | MacOSX15.4.sdk |
 
+### An unsigned package does not install on macOS 14
+
+Found by running the workflow rather than by reading it.
+On the `macos-14` image (macOS 14.8.9, Xcode 15.4):
+
+```
+installer: Package name is Zipee-0.1.0-macOS
+installer: Installing at base path /
+installer: The install was successful.
+<then no /Applications/Zipee.app, and /var/db/receipts has no Zipee entry>
+```
+
+`installer` reports success, writes **no receipt**, and installs **nothing**.
+The identical package installs correctly on `macos-15`. The difference is the
+package being unsigned: an unsigned flat package is not reliably installable on
+the older installer.
+
+Consequences, stated plainly:
+
+- The install check **gates on `macos-15` only**, and is `continue-on-error`
+  on `macos-14`, so it cannot mask a regression on the older image.
+- This is a direct, practical argument for **Developer ID signing**: an
+  unsigned build is not merely un-notarised, it is *not reliably installable*.
+- It is not evidence of a defect in Zipee's payload. The payload is verified
+  independently by `xar -tf` and `pkgutil --expand-full` on both images.
+
 ### What is still NOT verified
 
 | Claim | Status |
