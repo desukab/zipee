@@ -57,7 +57,7 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>14.0</string>
 
 	<!-- Finder's Services menu: "Extract with Zipee". -->
 	<key>NSServices</key>

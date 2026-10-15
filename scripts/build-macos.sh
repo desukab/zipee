@@ -47,7 +47,7 @@ BUILD_DIR="$REPO_ROOT/target/macos"
 APP_NAME="Zipee"
 BUNDLE_ID="app.zipee.Zipee"
 APP="$BUILD_DIR/$APP_NAME.app"
-DEPLOYMENT_TARGET_NUMBER="${ZIPEE_DEPLOYMENT_TARGET:-13.0}"
+DEPLOYMENT_TARGET_NUMBER="${ZIPEE_DEPLOYMENT_TARGET:-14.0}"
 CONTENTS="$APP/Contents"
 PKG_NAME="${APP_NAME}-${VERSION}-macOS.pkg"
 
@@ -174,7 +174,7 @@ done < <(find "$REPO_ROOT/macos/Zipee" -name '*.swift' | sort)
 # that will not be caught later, and there is no separate review step here.
 xcrun swiftc \
   -O \
-  -target "${HOST_ARCH}-apple-darwin${DEPLOYMENT_TARGET_NUMBER}" \
+  -target "${HOST_ARCH}-apple-macos${DEPLOYMENT_TARGET_NUMBER}" \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
   -L "$BUILD_DIR" \

@@ -201,7 +201,7 @@ public final class ZipeeArchive {
         let handle = url.path.withCString { path in
             zipee_open(path, &error)
         }
-        guard let handle, handle != nil else {
+        guard let handle else {
             let detail = error.map { String(cString: $0) } ?? "unknown error"
             zipee_string_free(error)
             throw ZipeeError(code: "open-failed", detail: detail)
@@ -222,13 +222,13 @@ public final class ZipeeArchive {
     /// Every member, read from the container index without decompressing.
     public func entries() throws -> [ZipeeEntry] {
         var error: UnsafeMutablePointer<CChar>?
-        var stats = zipee_stats(handle, &error)
-        if stats.totalEntries == 0, let e = error {
+        let summary = zipee_stats(handle, &error)
+        if summary.totalEntries == 0, let e = error {
             zipee_string_free(e)
             throw ZipeeError(code: "stats-failed", detail: String(cString: e))
         }
 
-        let count = Int(stats.totalEntries)
+        let count = Int(summary.totalEntries)
         guard count > 0 else { return [] }
         var raw = [ZipeeEntryRecord](
             repeating: ZipeeEntryRecord(
@@ -255,7 +255,6 @@ public final class ZipeeArchive {
             throw ZipeeError(code: "listing-failed", detail: detail)
         }
 
-        stats = stats  // keep the value alive for the duration of this scope
         return raw.prefix(written).compactMap { record in
             guard let namePtr = record.name else { return nil }
             let rawName = String(cString: namePtr)
