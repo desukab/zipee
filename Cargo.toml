@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = ["crates/zipee-engine", "crates/zipee-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/desukab/zipee"
+
+[workspace.dependencies]
+zipee-engine = { path = "crates/zipee-engine" }
+
+# License: MIT. Chosen for WinZip AES support (`aes-crypto`) so Zipee can read
+# the AES-256 archives that macOS Archive Utility cannot open at all.
+zip = { version = "2.4", default-features = false, features = ["deflate", "bzip2", "zstd", "time", "aes-crypto"] }
+flate2 = "1.1"
+crc32fast = "1.4"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.test]
+opt-level = 1

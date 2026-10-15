@@ -1,0 +1,16 @@
+[package]
+name = "zipee-cli"
+description = "Command-line interface to the Zipee archive engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "zipee"
+path = "src/main.rs"
+
+[dependencies]
+zipee-engine.workspace = true
+clap.workspace = true

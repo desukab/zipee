@@ -1,0 +1,16 @@
+[package]
+name = "zipee-engine"
+description = "Archive engine for Zipee: safe browsing, inspection, extraction and editing of archives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+zip.workspace = true
+crc32fast.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

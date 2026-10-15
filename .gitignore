@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.pkg
+.DS_Store
+research/
+/docs/research/artifacts/
