@@ -157,6 +157,9 @@ jobs:
           ./target/release/zipee verify "$work/t.zip"
 
       - name: Upload the package
+        # `always()` so a failure after packaging still yields the artifact,
+        # which is how the remaining defects get diagnosed at all.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Zipee-macOS-pkg

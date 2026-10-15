@@ -193,6 +193,12 @@ xcrun swiftc \
   "${SWIFT_SOURCES[@]}" \
   || die "swiftc failed"
 
+# Prove the binary exists and is a Mach-O before packaging anything. A silent
+# empty executable would otherwise reach the package.
+[[ -f "$CONTENTS/MacOS/$APP_NAME" ]] || die "swiftc produced no executable at $CONTENTS/MacOS/$APP_NAME"
+file "$CONTENTS/MacOS/$APP_NAME" | grep -q 'Mach-O' \
+  || die "the built executable is not a Mach-O: $(file -b "$CONTENTS/MacOS/$APP_NAME")"
+log "executable: $(file -b "$CONTENTS/MacOS/$APP_NAME")"
 # A universal binary needs every slice in one file. When only the host target
 # is available the bundle is single-arch, which is fine for local use and is
 # reported rather than hidden.
@@ -262,14 +268,18 @@ log "Verifying the package"
 # rather than a renamed archive.
 xar -tf "$PKG" >/dev/null || die "the produced file is not a valid XAR package"
 pkgutil --check-signature "$PKG" >"$BUILD_DIR/signature.txt" 2>&1 || true
-pkgutil --expand "$PKG" "$BUILD_DIR/pkg-expanded" >/dev/null || die "the package will not expand"
+pkgutil --expand-full "$PKG" "$BUILD_DIR/pkg-expanded" >/dev/null \
+  || die "the package will not expand"
 
 # Where the executable lands inside the expanded tree depends on the package
 # layout, so search for it rather than assuming. The point of the check is
 # that the payload is really there, not that it sits at one exact path.
 EXECUTABLE_FOUND="$(find "$BUILD_DIR/pkg-expanded" -type f -name "$APP_NAME" -path "*/MacOS/*" -print -quit)"
-[[ -n "$EXECUTABLE_FOUND" ]] \
-  || die "the expanded package contains no $APP_NAME executable"
+if [[ -z "$EXECUTABLE_FOUND" ]]; then
+  warn "expanded package tree:"
+  find "$BUILD_DIR/pkg-expanded" -maxdepth 4 | head -30 | sed 's/^/    /' >&2
+  die "the expanded package contains no $APP_NAME executable"
+fi
 [[ -f "$EXECUTABLE_FOUND/Contents/Info.plist" ]] \
   || die "the executable found in the package has no Info.plist"
 log "payload: ${EXECUTABLE_FOUND#$BUILD_DIR/pkg-expanded/}"
