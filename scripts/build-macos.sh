@@ -88,19 +88,27 @@ WANT_TARGETS=("$HOST_TARGET")
 CROSS_TARGET="$(rust_target_for_arch "$(if [[ "$HOST_ARCH" == arm64 ]]; then echo x86_64; else echo arm64; fi)")"
 [[ -n "$CROSS_TARGET" ]] && WANT_TARGETS+=("$CROSS_TARGET")
 
+# Ask for the cross target explicitly, and say so if it is refused: a missing
+# target silently produces a single-architecture app, which is worth knowing.
+if ! rustup target add "${WANT_TARGETS[@]}" 2>&1 | tail -5; then
+  warn "rustup could not add every target; continuing with what is installed"
+fi
+
 log "Building the archive core for: ${WANT_TARGETS[*]}"
 SLICES=()
 for target in "${WANT_TARGETS[@]}"; do
-  if rustup target list --installed | grep -qx "$target"; then
-    log "  building $target"
-    (cd "$REPO_ROOT" && cargo build --release --locked -p zipee-engine --target "$target")
-    SLICES+=("$REPO_ROOT/target/$target/release/libzipee_engine.a")
-  else
+  if ! rustup target list --installed | grep -qx "$target"; then
     if [[ "$target" == "$HOST_TARGET" ]]; then
       die "the host Rust target $HOST_TARGET is not installed; run: rustup target add $HOST_TARGET"
     fi
     warn "  skipping $target (not installed); the app will be single-architecture"
+    continue
   fi
+  log "  building $target"
+  (cd "$REPO_ROOT" && cargo build --release --locked -p zipee-engine --target "$target")
+  slice="$REPO_ROOT/target/$target/release/libzipee_engine.a"
+  [[ -f "$slice" ]] || die "expected a static library at $slice but cargo did not produce one"
+  SLICES+=("$slice")
 done
 
 [[ ${#SLICES[@]} -ge 1 ]] || die "no archive core was built"

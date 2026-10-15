@@ -74,6 +74,16 @@ pub enum Error {
     #[error("the archive changed on disk since it was opened")]
     ExternalModification,
 
+    /// A filesystem-adapter operation failed.
+    ///
+    /// Carrying the typed [`crate::fs_adapter::FsError`] rather than an
+    /// `io::Error` is deliberate: a mount backend must be able to tell
+    /// "no such file" from "you tried to escape the root" from "needs a
+    /// password", because each maps to a different errno and a different
+    /// sentence for the user.
+    #[error("{0}")]
+    Fs(#[from] crate::fs_adapter::FsError),
+
     /// The operation would have overwritten the source archive in place.
     ///
     /// Zipee never writes back over the original: it builds a replacement in a
@@ -88,6 +98,18 @@ impl Error {
         Self::Io {
             context: context.into(),
             source,
+        }
+    }
+
+    /// The typed filesystem error, when this is one.
+    ///
+    /// Lets a mount backend recover the precise failure — "no such file"
+    /// versus "escaped the root" versus "needs a password" — without
+    /// string-matching the message.
+    pub fn as_fs_error(&self) -> Option<&crate::fs_adapter::FsError> {
+        match self {
+            Self::Fs(e) => Some(e),
+            _ => None,
         }
     }
 
@@ -110,6 +132,7 @@ impl Error {
             Self::Corrupt(_) => "corrupt",
             Self::NoSuchEntry(_) => "no-such-entry",
             Self::Unsupported(_) => "unsupported",
+            Self::Fs(e) => e.reason(),
             Self::Cancelled => "cancelled",
             Self::ExternalModification => "external-modification",
             Self::InPlaceWriteRefused => "in-place-write-refused",

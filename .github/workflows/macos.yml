@@ -39,8 +39,15 @@ jobs:
     name: build app and package
     # `pull_request` is absent on purpose; see the header note.
     if: github.event_name != 'pull_request'
-    runs-on: macos-14
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15 carries the newest SDK this plan can reach. FSKit needs
+        # macOS 15.4 or later, so the older image is recorded as a fallback
+        # rather than relied on.
+        runner: [macos-15, macos-14]
 
     steps:
       - uses: actions/checkout@v4

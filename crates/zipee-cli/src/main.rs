@@ -153,6 +153,18 @@ enum Command {
 fn exit_code(e: &Error) -> u8 {
     match e {
         Error::Cancelled => 8,
+        // The filesystem adapter reuses the engine's taxonomy, so a mount-side
+        // refusal gets the same exit code as an extraction-side one.
+        Error::Fs(f) => match f {
+            zipee_engine::FsError::Escapes { .. } => 5,
+            zipee_engine::FsError::PasswordRequired { .. }
+            | zipee_engine::FsError::BadPassword { .. } => 4,
+            zipee_engine::FsError::Corrupt { .. } => 3,
+            zipee_engine::FsError::NotFound { .. } => 2,
+            zipee_engine::FsError::Cancelled => 8,
+            zipee_engine::FsError::Refused { .. } => 7,
+            _ => 2,
+        },
         Error::Budget(_) => 7,
         Error::Unsupported(_) | Error::UnsupportedEncryption { .. } => 6,
         Error::UnsafePath(_) => 5,

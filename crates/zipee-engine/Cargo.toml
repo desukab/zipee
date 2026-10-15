@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+# `rlib` keeps `cargo test` working; `staticlib` is what the macOS app links.
+# Without it, cargo emits only an rlib and `swiftc -lzipee_engine` has nothing
+# to link against -- which is exactly how the first macOS build failed.
+crate-type = ["rlib", "staticlib"]
+
 [dependencies]
 zip.workspace = true
 crc32fast.workspace = true
