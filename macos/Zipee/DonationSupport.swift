@@ -134,7 +134,8 @@ public enum DonationQRCode {
         guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
 
         let rep = NSBitmapImageRep(cgImage: cgImage)
-        rep.size = cgImage.width > 0 ? cgImage.size : scaled.extent.size
+        // CGImage exposes width and height, not size. Build the CGSize.
+        rep.size = CGSize(width: cgImage.width, height: cgImage.height)
         return rep.representation(using: .png, properties: [:])
     }
 
