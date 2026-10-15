@@ -131,6 +131,27 @@ final class ArchiveSession: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Move the browser to a folder.
+    ///
+    /// Exposed as a method rather than a settable property so that the view
+    /// cannot put the session into a state the model would not allow — for
+    /// example pointing at a path that is not in the archive.
+    func navigate(to newLocation: BrowseLocation) {
+        guard newLocation != location else { return }
+        location = newLocation
+        selection = []
+    }
+
+    /// Update the search text.
+    func search(_ text: String) {
+        searchText = text
+    }
+
+    /// Replace the row selection.
+    func select(_ paths: Set<String>) {
+        selection = paths
+    }
+
     /// Rows to show for the current location and search.
     var visibleItems: [BrowseItem] {
         let prefix = location.path

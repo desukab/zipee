@@ -94,7 +94,7 @@ struct BrowserView: View {
         List(selection: Binding(
             get: { session.location.path },
             set: { newValue in
-                session.location = newValue.isEmpty ? .root : .folder(newValue)
+                session.navigate(to: newValue.isEmpty ? .root : .folder(newValue))
             }
         )) {
             ForEach(sidebarRows) { row in
@@ -132,7 +132,7 @@ struct BrowserView: View {
     }
 
     private var table: some View {
-        Table(session.visibleItems, selection: $session.selection) {
+        Table(session.visibleItems, selection: selectionBinding) {
             TableColumn("Name") { item in
                 HStack(spacing: 6) {
                     Image(systemName: item.isDirectory ? "folder" : "doc")
@@ -153,7 +153,7 @@ struct BrowserView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            .width(min: 70, ideal: 90, alignment: .trailing)
+            .width(min: 70, ideal: 90)
         }
         .contextMenu(forSelectionType: String.self) { names in
             Button(extractTitle(for: names.count)) {
@@ -242,7 +242,14 @@ struct BrowserView: View {
     private var searchBinding: Binding<String> {
         Binding(
             get: { session.searchText },
-            set: { session.searchText = $0 }
+            set: { session.search($0) }
+        )
+    }
+
+    private var selectionBinding: Binding<Set<String>> {
+        Binding(
+            get: { session.selection },
+            set: { session.select($0) }
         )
     }
 }

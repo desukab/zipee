@@ -71,6 +71,11 @@ jobs:
       # that have never been type-checked is exactly what this repository is
       # trying to avoid. What this step establishes is whether a *future*
       # FSKit adapter could even be compiled on the available runners.
+      # Evidence, not implementation: record what this runner's SDK can and
+      # cannot do. No FSKit code is compiled here -- writing framework calls
+      # that have never been type-checked is exactly what this repository is
+      # trying to avoid. What this establishes is whether a *future* FSKit
+      # adapter could even be compiled on the available runners.
       - name: Probe the SDK for filesystem-extension frameworks
         run: |
           set -euo pipefail
@@ -79,20 +84,18 @@ jobs:
           echo "SDK version: $(xcrun --show-sdk-version --sdk macosx)"
           for fw in FSKit SystemExtensions ExtensionKit FileProvider FinderSync AppKit SwiftUI; do
             if [[ -d "$sdk/System/Library/Frameworks/$fw.framework" ]]; then
-              ver="/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-                    \"$sdk/System/Library/Frameworks/$fw.framework/Resources/Info.plist\" \
-                    2>/dev/null || echo '?'"
-              echo "  present: $fw ($ver)"
+              echo "  present: $fw"
             else
               echo "  ABSENT:  $fw"
             fi
           done
-          # The FSKit personality keys a mounted filesystem needs.
-          if [[ -f "$sdk/System/Library/Frameworks/FSKit.framework/Headers/FSKit.h" ]]; then
-            echo "FSKit.h is present; FSUnaryFileSystem is declared:"
-            grep -o 'FSUnaryFileSystem[A-Za-z]*' \
-              "$sdk/System/Library/Frameworks/FSKit.framework/Headers"/*.h \
-              2>/dev/null | sort -u | head -10 || true
+          echo "--- FSKit headers declaring a file-system module ---"
+          if [[ -d "$sdk/System/Library/Frameworks/FSKit.framework/Headers" ]]; then
+            grep -rhoE 'FSUnaryFileSystem[A-Za-z]*|UnaryFileSystemExtension[A-Za-z]*' \
+              "$sdk/System/Library/Frameworks/FSKit.framework/Headers" 2>/dev/null \
+              | sort -u | head -20 || echo "  (none found)"
+          else
+            echo "  FSKit.framework has no Headers directory"
           fi
 
       - name: Cache cargo
