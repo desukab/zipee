@@ -301,7 +301,9 @@ pkgutil --expand-full "$PKG" "$BUILD_DIR/pkg-expanded" >/dev/null \
 EXECUTABLE_FOUND="$(find "$BUILD_DIR/pkg-expanded" -type f -name "$APP_NAME" -path "*/MacOS/*" -print -quit)"
 if [[ -z "$EXECUTABLE_FOUND" ]]; then
   warn "expanded package tree:"
-  find "$BUILD_DIR/pkg-expanded" -maxdepth 4 | head -30 | sed 's/^/    /' >&2
+  # `sed -n` not `head`: head closes the pipe early and, under pipefail, fails
+  # the script -- which is the opposite of what a diagnostic wants.
+  find "$BUILD_DIR/pkg-expanded" -maxdepth 4 | sed 's/^/    /' | sed -n '1,30p' >&2
   die "the expanded package contains no $APP_NAME executable"
 fi
 # The find yields the binary itself (.../Zipee.app/Contents/MacOS/Zipee), so

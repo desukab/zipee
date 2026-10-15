@@ -94,12 +94,12 @@ jobs:
           echo "  ObjC Headers dir: $([[ -d "$fskit/Headers" ]] && echo present || echo absent)"
           echo "  Modules dir:       $([[ -d "$fskit/Modules" ]] && echo present || echo absent)"
           echo "  .swiftinterface files:"
-          find "$fskit" -name '*.swiftinterface' 2>/dev/null | head -5 | sed 's/^/    /' \
+          find "$fskit" -name '*.swiftinterface' 2>/dev/null | sed 's/^/    /' | sed -n '1,5p' \
             || true
           echo "  file-system-module symbols found anywhere in the framework:"
           find "$fskit" -type f \( -name '*.swiftinterface' -o -name '*.h' \) \
             -exec grep -hoE 'FSUnaryFileSystem[A-Za-z]*|UnaryFileSystemExtension[A-Za-z]*' {} + \
-            2>/dev/null | sort -u | head -20 | sed 's/^/    /' || true
+            2>/dev/null | sort -u | sed 's/^/    /' | sed -n '1,20p' || true
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -149,13 +149,18 @@ jobs:
             if [[ -d "$candidate" ]]; then app="$candidate"; break; fi
           done
           if [[ -z "$app" ]]; then
-            app="$(find /Applications "$HOME/Applications" / -maxdepth 4 -name 'Zipee.app' -type d 2>/dev/null | head -1)"
+            # `sed -n` rather than `head -1`: head closes the pipe early,
+            # which under `set -o pipefail` kills the producer and fails the
+            # step. This exact trap cost several cycles already.
+            found="$(find /Applications "$HOME/Applications" -maxdepth 4 -name 'Zipee.app' -type d 2>/dev/null || true)"
+            app="$(printf '%s\n' "$found" | sed -n '1p')"
           fi
           if [[ -z "$app" || ! -d "$app" ]]; then
             echo "::error::installer reported success but no Zipee.app was found"
             echo "payload receipt:"; cat /var/db/receipts/*Zipee* 2>/dev/null || true
             echo "searching the whole filesystem..."
             find / -name 'Zipee.app' -maxdepth 6 -type d 2>/dev/null || true
+            echo "receipts:"; sudo cat /var/db/receipts/*Zipee* 2>/dev/null | head -40 || true
             exit 1
           fi
           echo "installed at: $app"
@@ -165,7 +170,8 @@ jobs:
           # failure of the step.
           if ! codesign --verify --deep --strict "$app" 2>&1; then
             echo "unsigned build: codesign verification failed, as expected without a Developer ID"
-            codesign --display --verbose=2 "$app" 2>&1 | head -5 || true
+            sig="$(codesign --display --verbose=2 "$app" 2>&1 || true)"
+            printf '%s\n' "$sig" | sed -n '1,5p'
           fi
           # Prove the bundle is structurally whole and the engine is linked in.
           #
