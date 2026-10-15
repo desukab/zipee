@@ -257,6 +257,14 @@ fn cmd_info(archive: &Path) -> Result<(), Error> {
             s.unsafe_entries
         );
     }
+
+    // Say what is held back. An archive that quietly shows fewer files than it
+    // contains looks damaged, so this is reported rather than omitted.
+    let mut a2 = open_any(archive)?;
+    let vfs = a2.vfs()?;
+    if let Some(summary) = vfs.hidden_summary() {
+        println!("hidden:    {summary}");
+    }
     println!(
         "unpacked:  {} ({}% of original)",
         s.human_uncompressed(),

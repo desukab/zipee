@@ -231,9 +231,17 @@ pub fn extract(
     // one behaviour this whole module exists to prevent.
     let selected: Vec<&ArchiveEntry> = entries
         .iter()
-        .filter(|e| match &e.path {
-            Some(p) => selection.matches(&p.as_key()),
-            None => true,
+        .filter(|e| {
+            // macOS metadata is never materialised, exactly as it is never
+            // browsable. Extraction works from the container index rather than
+            // the Vfs, so the policy has to be applied here too.
+            if crate::macmeta::is_mac_metadata(&e.raw_name) {
+                return false;
+            }
+            match &e.path {
+                Some(p) => selection.matches(&p.as_key()),
+                None => true,
+            }
         })
         .collect();
 

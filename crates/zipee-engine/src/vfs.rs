@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::entry::{ArchiveEntry, EntryKind};
+use crate::macmeta::{self, MacMetadataSummary};
 use crate::security::SafeMemberPath;
 
 /// One node in the browsable tree.
@@ -41,6 +42,10 @@ pub struct Vfs {
     children: BTreeMap<String, Vec<String>>,
     /// Members rejected by the path-safety rules, for the diagnostics panel.
     rejected: Vec<(String, String)>,
+    /// What was held back, so the UI can explain the tree rather than lie.
+    mac_metadata: MacMetadataSummary,
+    /// Members whose names collide on a case-insensitive volume.
+    case_collisions: Vec<(String, String)>,
 }
 
 impl Vfs {
@@ -51,6 +56,15 @@ impl Vfs {
     /// their paths tried to escape the archive" instead of silently hiding them.
     pub fn from_entries(entries: &[ArchiveEntry]) -> Self {
         let mut vfs = Self::default();
+
+        // macOS metadata is derived data, never content. Hold it back before it
+        // reaches the tree, and count it so nothing silently disappears.
+        let mut pairs: Vec<(&str, u64)> = Vec::with_capacity(entries.len());
+        for e in entries {
+            pairs.push((e.raw_name.as_str(), e.uncompressed_size));
+        }
+        vfs.mac_metadata = macmeta::classify_all(pairs);
+
         for e in entries {
             let Some(path) = &e.path else {
                 vfs.rejected.push((
@@ -62,6 +76,13 @@ impl Vfs {
                 ));
                 continue;
             };
+
+            // A `._name` or `__MACOSX/...` member describes a sibling, it is
+            // not itself part of the archive's contents.
+            if macmeta::is_mac_metadata(&e.raw_name) {
+                continue;
+            }
+
             let key = path.as_key();
             vfs.nodes.insert(
                 key.clone(),
@@ -76,9 +97,35 @@ impl Vfs {
                 },
             );
         }
+        // Implied directories first: an archive holding `Src/a.txt` and
+        // `src/b.txt` collides on the *parent* names, and those nodes only
+        // exist once the prefixes have been materialised.
         vfs.materialise_implicit_dirs();
+        vfs.detect_case_collisions();
         vfs.rebuild_children();
         vfs
+    }
+
+    /// Find members that collide when compared case-insensitively.
+    ///
+    /// macOS's default volume is case-insensitive, so an archive holding both
+    /// `A.txt` and `a.txt` cannot be extracted faithfully to both. Zipee does
+    /// not silently pick a winner: it records the collision so the UI can say
+    /// so, and extraction stays last-one-wins exactly like `unzip`.
+    fn detect_case_collisions(&mut self) {
+        let mut seen: HashMap<String, String> = HashMap::new();
+        let mut keys: Vec<String> = self.nodes.keys().cloned().collect();
+        keys.sort();
+        for key in keys {
+            let folded = key.to_lowercase();
+            if let Some(first) = seen.get(&folded) {
+                if first != &key {
+                    self.case_collisions.push((first.clone(), key));
+                }
+            } else {
+                seen.insert(folded, key);
+            }
+        }
     }
 
     /// Add the directory nodes that no explicit entry declared.
@@ -237,6 +284,36 @@ impl Vfs {
     /// Members that were rejected by the path-safety rules.
     pub fn rejected(&self) -> &[(String, String)] {
         &self.rejected
+    }
+
+    /// What macOS metadata was held back, if any.
+    pub fn mac_metadata(&self) -> &MacMetadataSummary {
+        &self.mac_metadata
+    }
+
+    /// Members that collide on a case-insensitive volume, as
+    /// `(first, colliding)`.
+    pub fn case_collisions(&self) -> &[(String, String)] {
+        &self.case_collisions
+    }
+
+    /// A sentence describing everything held back from the tree.
+    ///
+    /// `None` only when the archive had nothing unusual, so a caller can
+    /// attach this unconditionally without showing an empty notice.
+    pub fn hidden_summary(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        if let Some(m) = self.mac_metadata.description() {
+            parts.push(m);
+        }
+        if !self.case_collisions.is_empty() {
+            let n = self.case_collisions.len();
+            parts.push(format!(
+                "{n} name{} collide on a case-insensitive volume",
+                if n == 1 { "" } else { "s" }
+            ));
+        }
+        (!parts.is_empty()).then(|| parts.join("; "))
     }
 
     /// Sum of the sizes of every file in the subtree rooted at `dir`.

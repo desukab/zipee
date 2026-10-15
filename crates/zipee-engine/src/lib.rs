@@ -50,6 +50,7 @@ pub mod extract;
 pub mod ffi;
 pub mod format;
 pub mod fs_adapter;
+pub mod macmeta;
 pub mod nested;
 pub mod security;
 pub mod tar_archive;
@@ -69,6 +70,7 @@ pub use fs_adapter::{
     downcast_fs_error, open_fs, ArchiveFs, DirEntry, FsAdapter, FsError, NodeAttributes, NodeKind,
     ReadRequest,
 };
+pub use macmeta::{is_mac_metadata, MacMetadataSummary};
 pub use security::{
     sanitize_member_path, BudgetExceeded, ExtractionBudget, PathViolation, SafeMemberPath,
 };

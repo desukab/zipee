@@ -42,25 +42,44 @@ pub struct ZipArchive {
     index_map: Option<std::collections::HashMap<String, usize>>,
 }
 
-/// Cheap identity of a file at open time: size plus modification time.
+/// Cheap identity of a file at open time.
 ///
-/// Used to notice that something rewrote the archive underneath an open
-/// session. This is a heuristic, not a guarantee — an attacker who restores
-/// both fields is not detected — and it is documented as such.
+/// Four parts, because each catches a different way a file can change
+/// underneath an open session:
+///
+/// * **device + inode** catch a *replacement*. An app that writes a new file
+///   and renames it over the old one can preserve size and modification time
+///   deliberately; it cannot preserve the inode without going to great
+///   lengths.
+/// * **size** catches a shorter rewrite immediately.
+/// * **modification time** catches an in-place edit of equal length.
+///
+/// This is still a heuristic, not a cryptographic guarantee: an attacker with
+/// write access can restore all four. It is documented as such, and the
+/// guarantee that actually matters is structural — see [`crate::writeback`],
+/// which never edits the original in place, so a failed save cannot damage it
+/// whatever this fingerprint misses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileFingerprint {
     /// Size in bytes at open time.
     pub len: u64,
     /// Modified time at open time, if the platform reported one.
     pub modified: Option<std::time::SystemTime>,
+    /// Device number, on platforms that report one.
+    pub device: Option<u64>,
+    /// Inode number, on platforms that report one.
+    pub inode: Option<u64>,
 }
 
 /// Read a fingerprint for a path.
 pub fn fingerprint(path: &Path) -> Result<FileFingerprint> {
+    use std::os::unix::fs::MetadataExt;
     let meta = std::fs::metadata(path).ctx("reading archive metadata")?;
     Ok(FileFingerprint {
         len: meta.len(),
         modified: meta.modified().ok(),
+        device: Some(meta.dev()),
+        inode: Some(meta.ino()),
     })
 }
 
@@ -71,9 +90,22 @@ impl ZipArchive {
     /// hint. Returns [`Error::Detect`] if the bytes are not a ZIP.
     pub fn open(path: &Path) -> Result<Self> {
         let file = File::open(path).ctx("opening archive")?;
-        let fp = FileFingerprint {
-            len: file.metadata().map(|m| m.len()).unwrap_or(0),
-            modified: file.metadata().ok().and_then(|m| m.modified().ok()),
+        let fp = match file.metadata() {
+            Ok(m) => {
+                use std::os::unix::fs::MetadataExt;
+                FileFingerprint {
+                    len: m.len(),
+                    modified: m.modified().ok(),
+                    device: Some(m.dev()),
+                    inode: Some(m.ino()),
+                }
+            }
+            Err(_) => FileFingerprint {
+                len: 0,
+                modified: None,
+                device: None,
+                inode: None,
+            },
         };
         let boxed: Box<dyn ReadSeek> = Box::new(file);
         let reader = zip::ZipArchive::new(boxed).map_err(map_zip_error)?;
@@ -92,6 +124,8 @@ impl ZipArchive {
         let fp = FileFingerprint {
             len: bytes.len() as u64,
             modified: None,
+            device: None,
+            inode: None,
         };
         let cursor = std::io::Cursor::new(bytes);
         let boxed: Box<dyn ReadSeek> = Box::new(cursor);

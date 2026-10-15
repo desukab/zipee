@@ -4,3 +4,9 @@
 .DS_Store
 research/
 /docs/research/artifacts/
+
+# Proprietary binaries from the reference package are never committed.
+# docs/research/decompilation/ holds only derived evidence (symbol lists and
+# request manifests); the Mach-O slices stay in the ignored research tree.
+research/**/macho/
+docs/research/**/macho/

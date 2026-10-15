@@ -34,6 +34,8 @@ pub enum PathViolation {
     Absolute,
     /// Name exceeded `MAX_PATH_BYTES`.
     TooLong(usize),
+    /// A single path component exceeded [`MAX_COMPONENT_BYTES`].
+    ComponentTooLong(usize),
     /// A symlink member pointed outside the extraction root.
     SymlinkEscape(String),
 }
@@ -48,6 +50,12 @@ impl fmt::Display for PathViolation {
             Self::Traversal => write!(f, "member name tries to escape the extraction root"),
             Self::Absolute => write!(f, "member name is an absolute path"),
             Self::TooLong(n) => write!(f, "member name is {n} bytes, limit is {MAX_PATH_BYTES}"),
+            Self::ComponentTooLong(n) => {
+                write!(
+                    f,
+                    "a path component is {n} bytes, limit is {MAX_COMPONENT_BYTES}"
+                )
+            }
             Self::SymlinkEscape(t) => write!(f, "symlink target {t:?} escapes the extraction root"),
         }
     }
@@ -59,6 +67,27 @@ impl fmt::Display for PathViolation {
 /// POSIX leaves room for much longer names in an archive. Refusing early keeps
 /// downstream filesystem writes from failing in less obvious ways.
 pub const MAX_PATH_BYTES: usize = 4096;
+
+/// Longest a *single* path component may be, in bytes.
+///
+/// The whole-path limit alone is not enough: a member can be well under
+/// [`MAX_PATH_BYTES`] overall and still carry one component no filesystem
+/// will accept, which would fail at write time rather than at read time.
+pub const MAX_COMPONENT_BYTES: usize = 255;
+
+/// The mode Zipee applies to an extracted member whose archive records none.
+///
+/// 0644 for a file: readable by its owner and group, writable by its owner.
+/// Deliberately not 0640 and certainly not 0666 — an archive with no recorded
+/// mode gives no reason to widen access.
+pub const DEFAULT_FILE_MODE: u32 = 0o644;
+
+/// The mode Zipee applies to an extracted directory whose archive records none.
+///
+/// 0755, so the tree stays navigable. Deliberately not 0777: making a
+/// directory world-writable because an archive was silent about its mode would
+/// be a surprising and unsafe default.
+pub const DEFAULT_DIRECTORY_MODE: u32 = 0o755;
 
 /// A member name that has been proven safe to resolve inside an extraction root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +136,15 @@ pub fn sanitize_member_path(raw: &str) -> Result<SafeMemberPath, PathViolation> 
     }
     if raw.len() > MAX_PATH_BYTES {
         return Err(PathViolation::TooLong(raw.len()));
+    }
+    // The whole-path limit is not sufficient on its own: a member can be well
+    // under MAX_PATH_BYTES overall and still carry one component no
+    // filesystem will accept, which would fail at write time rather than at
+    // read time.
+    for part in raw.split('/') {
+        if part.len() > MAX_COMPONENT_BYTES {
+            return Err(PathViolation::ComponentTooLong(part.len()));
+        }
     }
     if let Some(bad) = raw.bytes().find(|b| *b < 0x20 || *b == 0x7f) {
         return Err(PathViolation::ControlCharacter(bad));
@@ -402,8 +440,31 @@ mod tests {
             sanitize_member_path(&long),
             Err(PathViolation::TooLong(MAX_PATH_BYTES + 1))
         );
-        // exactly at the limit is fine
-        assert!(sanitize_member_path(&"a".repeat(MAX_PATH_BYTES)).is_ok());
+        // Exactly at the whole-path limit is accepted *when it is split into
+        // legal components*. A single 4096-byte component is refused for a
+        // different reason, which is the stricter and more useful rule.
+        let split = (0..20)
+            .map(|_| "a".repeat(200))
+            .collect::<Vec<_>>()
+            .join("/");
+        assert!(split.len() <= MAX_PATH_BYTES);
+        assert!(sanitize_member_path(&split).is_ok());
+    }
+
+    #[test]
+    fn rejects_an_overlong_single_component() {
+        // Under the whole-path limit, over the component limit: a naive check
+        // would accept this and the write would fail later.
+        let stem = "a".repeat(300);
+        let name = format!("{stem}.txt");
+        assert!(name.len() < MAX_PATH_BYTES);
+        assert_eq!(
+            sanitize_member_path(&name),
+            Err(PathViolation::ComponentTooLong(stem.len() + ".txt".len()))
+        );
+        // Splitting the same bytes across two components is fine.
+        let split = format!("{}/{}", "a".repeat(200), "b".repeat(200));
+        assert!(sanitize_member_path(&split).is_ok());
     }
 
     #[test]
