@@ -118,6 +118,18 @@ done
 
 [[ ${#SLICES[@]} -ge 1 ]] || die "no archive core was built"
 
+# The app can only be compiled for an architecture the core was built for.
+WANT_ARCHS=()
+for target in "${WANT_TARGETS[@]}"; do
+  slice="$REPO_ROOT/target/$target/release/libzipee_engine.a"
+  [[ -f "$slice" ]] || continue
+  case "$target" in
+    aarch64-apple-darwin) WANT_ARCHS+=(arm64) ;;
+    x86_64-apple-darwin)  WANT_ARCHS+=(x86_64) ;;
+  esac
+done
+[[ ${#WANT_ARCHS[@]} -ge 1 ]] || die "no usable architecture slice was built"
+
 LIB="$BUILD_DIR/libzipee_engine.a"
 # `lipo` writes a temporary next to its output and fails if the directory is
 # absent, so create it rather than relying on the app-bundle step later.
@@ -177,21 +189,33 @@ done < <(find "$REPO_ROOT/macos/Zipee" -name '*.swift' | sort)
 
 # -warnings-as-errors is deliberate: a warning in a shipping app is a defect
 # that will not be caught later, and there is no separate review step here.
-xcrun swiftc \
-  -O \
-  -target "${HOST_ARCH}-apple-macos${DEPLOYMENT_TARGET_NUMBER}" \
-  -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
-  -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
-  -L "$BUILD_DIR" \
-  -lzipee_engine \
-  -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers \
-  -lz -lbz2 -liconv \
-  -Xlinker -force_load -Xlinker "$LIB" \
-  -Xlinker -dead_strip \
-  -warnings-as-errors \
-  -o "$CONTENTS/MacOS/$APP_NAME" \
-  "${SWIFT_SOURCES[@]}" \
-  || die "swiftc failed"
+APP_SLICES=()
+for arch in "${WANT_ARCHS[@]}"; do
+  slice_out="$BUILD_DIR/Zipee-$arch"
+  log "  compiling the app for $arch"
+  xcrun swiftc \
+    -O \
+    -target "${arch}-apple-macos${DEPLOYMENT_TARGET_NUMBER}" \
+    -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
+    -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
+    -L "$BUILD_DIR" \
+    -lzipee_engine \
+    -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers \
+    -lz -lbz2 -liconv \
+    -Xlinker -force_load -Xlinker "$LIB" \
+    -Xlinker -dead_strip \
+    -warnings-as-errors \
+    -o "$slice_out" \
+    "${SWIFT_SOURCES[@]}" || die "swiftc failed for $arch"
+  [[ -f "$slice_out" ]] || die "swiftc produced no binary for $arch"
+  APP_SLICES+=("$slice_out")
+done
+
+if [[ ${#APP_SLICES[@]} -gt 1 ]]; then
+  lipo -create "${APP_SLICES[@]}" -output "$CONTENTS/MacOS/$APP_NAME"
+else
+  cp "${APP_SLICES[0]}" "$CONTENTS/MacOS/$APP_NAME"
+fi
 
 # Prove the binary exists and is a Mach-O before packaging anything. A silent
 # empty executable would otherwise reach the package.

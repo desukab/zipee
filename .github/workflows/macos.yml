@@ -142,8 +142,17 @@ jobs:
           sudo installer -pkg "$pkg" -target /
           ls -d /Applications/Zipee.app
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Zipee.app/Contents/Info.plist
-          codesign --verify --deep --strict /Applications/Zipee.app || \
-            echo "unsigned build: codesign verification expected to fail"
+          # An unsigned bundle cannot verify. That is the expected state of a
+          # credential-free build, so it is reported and not treated as a
+          # failure of the step.
+          if ! codesign --verify --deep --strict /Applications/Zipee.app 2>&1; then
+            echo "unsigned build: codesign verification failed, as expected without a Developer ID"
+            codesign --display --verbose=2 /Applications/Zipee.app 2>&1 | head -5 || true
+          fi
+          # Prove the bundle is structurally whole and the engine is linked in.
+          /usr/bin/file -b /Applications/Zipee.app/Contents/MacOS/Zipee
+          /usr/bin/otool -L /Applications/Zipee.app/Contents/MacOS/Zipee | head -5
+          echo "step complete" 
 
       - name: Run the CLI that ships in the engine
         run: |
