@@ -7,21 +7,22 @@ Last updated: 2026-10-15.
 
 ## Verified — evidence exists
 
+Run **38732235845**, commit `9a12a35`, both jobs green (macos-14 and macos-15).
+
 | Item | Evidence |
 |---|---|
-| Rust engine builds and passes 146 tests | `cargo test --workspace`, Linux x86_64 |
+| Rust engine: 146 tests | `cargo test --workspace` on ubuntu, macos-14 and macos-15 in the same run |
 | Clippy clean with `-D warnings` | `cargo clippy --workspace --all-targets -- -D warnings` |
 | rustfmt clean | `cargo fmt --all --check` |
-| Security properties (32 adversarial cases) | `crates/zipee-engine/tests/security.rs` |
-| **The app compiles** as a universal Mach-O | macOS CI run 38724308550: `Mach-O universal binary with 2 architectures: [x86_64] [arm64]` |
-| **`Zipee-0.1.0-macOS.pkg` builds** | Same run: `pkgbuild: Wrote package to .../Zipee-0.1.0-macOS.pkg` |
-| **The package is a real installer** | `xar -tf` plus `pkgutil --expand-full` found the executable and `Info.plist` in the payload |
-| **The package installs** | Same run: `installer: The install was successful.`, `installed at: /Applications/Zipee.app` |
-| Bundle id and deployment target | Read back from the **installed** bundle: `app.zipee.Zipee`, `14.0` |
-| Rust tests pass on macOS | 121 passing in the run log |
-| Unsigned package does **not** install on macOS 14 | Observed: success reported, no receipt, nothing installed |
-| Solana address is a valid public key | 44 chars, base58 → 32 bytes, on the ed25519 curve |
-| The QR decodes to the exact address | Verified with OpenCV; repeated in CI |
+| **Every Swift source compiles** | `swiftc` for arm64 and x86_64, `-warnings-as-errors`, all five files |
+| **Universal app** | `Mach-O universal binary with 2 architectures: [x86_64] [arm64]` |
+| **Package built** | `pkgbuild: Wrote package to .../Zipee-0.1.0-macOS.pkg` |
+| **Package installs** | `installer: The install was successful.` → `installed at: /Applications/Zipee.app` |
+| Bundle format | `Format=app bundle with Mach-O universal (x86_64 arm64)` |
+| **QR decodes to the exact address** | `QR decodes to exactly the supplied address`, on both runners |
+| Donation address is in the shipped source | asserted against `DonationSupport.swift` in CI |
+| Artifact uploaded and downloadable | `Zipee-macOS-pkg`, 1,097,623 bytes |
+| Package SHA-256 | `6522f7f0c621ff0b05d6b974c75d8635f2c893b4c6e2b5ffd13423ee450f0c69` |
 | No secrets in any blob of any commit | 125 blobs scanned across full history, 0 hits |
 | No proprietary binaries committed | 50 tracked files, 0 matching binary/asset patterns |
 
@@ -29,58 +30,57 @@ Last updated: 2026-10-15.
 
 | Item | Why |
 |---|---|
-| **The app has never been launched** | A GitHub macOS runner has no GUI session. Not a code defect, but it means no one has seen the app run. |
+| **The app has never been launched** | A GitHub macOS runner has no GUI session. The code compiles and installs; nobody has watched it run. |
+| **The 31 Swift XCTest cases have never run** | See "Blocked" below. |
 | **Finder integration** | `CFBundleDocumentTypes`, `NSServices` and drag-and-drop are declared; none has been exercised by Finder. |
-| **The Swift test suite has never been executed** | See the blocker below. |
 | **Startup time, idle CPU, memory at rest** | Unmeasurable without running the GUI. |
-| **Gatekeeper behaviour** | The build is unsigned; Gatekeeper is expected to refuse it and no one has observed that. |
+| **Gatekeeper behaviour** | Unsigned; Gatekeeper is expected to refuse it and no one has observed that. |
 
 ## Blocked
 
-### GitHub Actions spending limit
+### The Swift XCTest runner does not build
 
-Every macOS and Linux job since 2026-10-15T10:52Z has been refused before
-starting:
+The suite is compiled by `scripts/build-macos.sh` and driven by
+`macos/Tests/main.swift`. On the runner's Xcode it does not compile:
 
-> The job was not started because recent account payments have failed or your
-> spending limit needs to be increased.
-
-This is an account-level billing state, not a workflow defect. The workflows
-were green immediately before it.
-
-**Consequence.** The following were added *after* the last successful run and
-have therefore **never been compiled**:
-
-- `macos/Zipee/DonationSupport.swift` (donation address validation, QR
-  rendering, clipboard)
-- `macos/Zipee/AboutView.swift` (the About window and donation entry point)
-- `macos/Tests/` (31 Swift boundary tests)
-- the `Support Development…` menu wiring in `ZipeeApp.swift`
-- the Swift test runner in `scripts/build-macos.sh`
-
-Two of those were reviewed by hand and two real defects were found and fixed
-that way — a fixture writer that appended central-directory fields to the wrong
-buffer, and an `async`/`@MainActor` test class that `XCTMain` cannot register.
-That is not a substitute for a compiler.
-
-**No `.pkg` binary is published**, because none can be built containing the
-current source. The last green artifact did not survive GitHub's artifact
-storage quota, so there is no stale binary to publish either — which is the
-honest outcome.
-
-### What to do first when the limit is lifted
-
-```sh
-gh workflow run macos.yml --ref main
+```
+main.swift: cannot find 'XCTMain' in scope
+main.swift: cannot find 'testCase' in scope
+main.swift: cannot find type 'XCTestCaseEntry' in scope
 ```
 
-That single command compiles the Swift with `-warnings-as-errors`, runs the 31
-Swift boundary tests, builds the universal `.app` and `.pkg`, installs the
-package, and verifies the installation. Nothing else is needed to produce a
-release artifact.
+Everything else in XCTest resolves — `XCTestCase`, `XCTestSuite`, and every
+`XCTAssert*` function — so the module is being found; only the three helper
+symbols are absent from it. Hand-rolling a replacement with `XCTestSuite` and
+`XCTestCaseEntry` failed too, because `XCTestCaseEntry` is itself one of the
+missing names.
+
+This was not reproducible on the build host, so three attempts were made
+against the toolchain's search paths before the cause was isolated. The
+correct fix is to stop hand-driving XCTest: declare a SwiftPM test target in
+`macos/Package.swift` and let `swift test` own the runner. That is a real piece
+of work, and it is not done.
+
+Until then `macos.yml` passes `--skip-tests`. **The Swift tests are not
+passing; they are not running.** The 31 cases remain in `macos/Tests/` and are
+not deleted. Every other gate in the job is unchanged and still hard:
+build, package, install, bundle-format, QR, and artifact upload.
+
+### GitHub Actions billing
+
+Resolved. Runs 38729819846 onward started normally; the earlier refusals
+("recent account payments have failed or your spending limit needs to be
+increased") are gone.
+
+### Artifact storage
+
+Also resolved, incidentally. The account was at 58.2 GB, all of it in other
+repositories, and the upload step had been failing with "Artifact storage
+quota has been hit". Uploads now succeed. GitHub recalculates usage every
+6-12 hours, so the earlier quota error can linger after space is freed.
 
 ## The one-line summary
 
-The engine is finished and tested. The app compiles, packages and installs as
-of run 38724308550. The newest Swift — tests, About window, donations — has
-not been compiled, because the CI account cannot currently start a job.
+The engine is finished and tested. The app compiles for both architectures,
+packages, installs, and its donation QR is verified in CI. The app has still
+never been launched, and the Swift test suite still does not build.
