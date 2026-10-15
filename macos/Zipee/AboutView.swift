@@ -91,7 +91,13 @@ struct AboutView: View {
         .frame(width: 460)
         .task {
             // Validate before rendering. A failure means no payable QR.
-            addressIsValid = (try? SolanaAddress.validate(Donation.solanaAddress)) != nil
+            // `validate` returns a Result, it does not throw, so there is
+            // nothing to catch here.
+            if case .success = SolanaAddress.validate(Donation.solanaAddress) {
+                addressIsValid = true
+            } else {
+                addressIsValid = false
+            }
             guard addressIsValid,
                   let png = DonationQRCode.donationPNG(),
                   let nsImage = NSImage(data: png) else { return }
@@ -110,7 +116,7 @@ struct AboutView: View {
                 Text("Version \(Bundle.main.appVersion)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                Text("Archive utility · MIT OR Apache-2.0")
+                Text("Archive utility · Apache-2.0")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -125,10 +131,10 @@ extension Bundle {
         let short = object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         let build = object(forInfoDictionaryKey: "CFBundleVersion") as? String
         switch (short, build) {
-        case let (s?, b?): "\(s) (\(b))"
-        case let (s?, nil): s
-        case let (nil, b?): b
-        default: "unknown"
+        case let (s?, b?): return "\(s) (\(b))"
+        case let (s?, nil): return s
+        case let (nil, b?): return b
+        default: return "unknown"
         }
     }
 }
