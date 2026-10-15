@@ -225,7 +225,18 @@ fi
 
 if [[ "$SKIP_TESTS" -eq 0 ]]; then
   log "Running the Swift test suite"
-  XCTEST_FRAMEWORKS="$(xcrun --show-sdk-platform-path)/Developer/Library/Frameworks"
+  # XCTest is split: the Objective-C framework is under Developer/Library/
+  # Frameworks, but XCTAssertEqual and friends are a *Swift overlay* whose
+  # swiftmodule lives under Developer/usr/lib. Passing only -F finds the
+  # framework, so `import XCTest` succeeds and then every assertion comes back
+  # "cannot find XCTAssert... in scope". Point at the module explicitly.
+  XCTEST_PLATFORM="$(xcrun --show-sdk-platform-path)"
+  XCTEST_FRAMEWORKS="$XCTEST_PLATFORM/Developer/Library/Frameworks"
+  XCTEST_MODULE="$(find "$XCTEST_PLATFORM/Developer" -maxdepth 4 -name 'XCTest.swiftmodule' -print -quit 2>/dev/null || true)"
+  [[ -n "$XCTEST_MODULE" ]] || die "cannot locate XCTest.swiftmodule under $XCTEST_PLATFORM/Developer"
+  XCTEST_MODULE_DIR="$(dirname "$XCTEST_MODULE")"
+  log "  XCTest framework: $XCTEST_FRAMEWORKS"
+  log "  XCTest module:    $XCTEST_MODULE_DIR"
   TEST_BIN="$BUILD_DIR/ZipeeEngineTests"
 
   # The app sources minus the @main entry point, which a test executable must
@@ -245,7 +256,7 @@ if [[ "$SKIP_TESTS" -eq 0 ]]; then
       -target "${arch}-apple-macos${DEPLOYMENT_TARGET_NUMBER}" \
       -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
       -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
-      -I "$XCTEST_FRAMEWORKS" -F "$XCTEST_FRAMEWORKS" \
+      -I "$XCTEST_FRAMEWORKS" -I "$XCTEST_MODULE_DIR" -F "$XCTEST_FRAMEWORKS" \
       -L "$BUILD_DIR" -lzipee_engine \
       -framework XCTest -framework AppKit -framework SwiftUI -framework CoreImage \
       -lz -lbz2 -liconv \
