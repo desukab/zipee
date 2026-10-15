@@ -105,7 +105,12 @@ for target in "${WANT_TARGETS[@]}"; do
     continue
   fi
   log "  building $target"
-  (cd "$REPO_ROOT" && cargo build --release --locked -p zipee-engine --target "$target")
+  # Without this the Rust objects are stamped with the runner's SDK version and
+  # the linker reports them as "built for newer macOS version than being
+  # linked" -- i.e. the shipped binary would call APIs the deployment target
+  # does not have.
+  (cd "$REPO_ROOT" && MACOSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET_NUMBER" \
+    cargo build --release --locked -p zipee-engine --target "$target")
   slice="$REPO_ROOT/target/$target/release/libzipee_engine.a"
   [[ -f "$slice" ]] || die "expected a static library at $slice but cargo did not produce one"
   SLICES+=("$slice")
@@ -180,6 +185,7 @@ xcrun swiftc \
   -L "$BUILD_DIR" \
   -lzipee_engine \
   -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers \
+  -lz -lbz2 -liconv \
   -Xlinker -force_load -Xlinker "$LIB" \
   -Xlinker -dead_strip \
   -warnings-as-errors \
