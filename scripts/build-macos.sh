@@ -47,6 +47,7 @@ BUILD_DIR="$REPO_ROOT/target/macos"
 APP_NAME="Zipee"
 BUNDLE_ID="app.zipee.Zipee"
 APP="$BUILD_DIR/$APP_NAME.app"
+DEPLOYMENT_TARGET_NUMBER="${ZIPEE_DEPLOYMENT_TARGET:-13.0}"
 CONTENTS="$APP/Contents"
 PKG_NAME="${APP_NAME}-${VERSION}-macOS.pkg"
 
@@ -66,21 +67,52 @@ fi
 
 # --- native engine ----------------------------------------------------------
 
-log "Building the archive core as a static library (universal)"
-if ! rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null 2>&1; then
-  warn "could not add both Apple targets; falling back to the host architecture only"
-  rustup target add "$(uname -m)-apple-darwin" >/dev/null 2>&1 || true
-fi
-HOST_TARGET="$(uname -m)-apple-darwin"
-if rustup target list --installed | grep -qx "$HOST_TARGET"; then
-  (cd "$REPO_ROOT" && cargo build --release --locked -p zipee-engine)
-  LIB="$REPO_ROOT/target/release/libzipee_engine.a"
-  [[ -f "$LIB" ]] || die "expected $LIB to exist after cargo build"
-else
-  die "the $HOST_TARGET Rust target is not installed"
-fi
+# `uname -m` and Rust's target triple disagree on Apple silicon: the kernel
+# reports "arm64", the toolchain wants "aarch64-apple-darwin". Getting this
+# wrong makes the target look uninstalled forever.
+rust_target_for_arch() {
+  case "$1" in
+    arm64)  echo "aarch64-apple-darwin" ;;
+    x86_64) echo "x86_64-apple-darwin" ;;
+    *)      echo "" ;;
+  esac
+}
+
+HOST_ARCH="$(uname -m)"
+HOST_TARGET="$(rust_target_for_arch "$HOST_ARCH")"
+[[ -n "$HOST_TARGET" ]] || die "unsupported architecture: $HOST_ARCH"
+
+# Build both slices so the shipped binary is universal. A runner may only be
+# able to produce one; that is reported rather than hidden.
+WANT_TARGETS=("$HOST_TARGET")
+CROSS_TARGET="$(rust_target_for_arch "$(if [[ "$HOST_ARCH" == arm64 ]]; then echo x86_64; else echo arm64; fi)")"
+[[ -n "$CROSS_TARGET" ]] && WANT_TARGETS+=("$CROSS_TARGET")
+
+log "Building the archive core for: ${WANT_TARGETS[*]}"
+SLICES=()
+for target in "${WANT_TARGETS[@]}"; do
+  if rustup target list --installed | grep -qx "$target"; then
+    log "  building $target"
+    (cd "$REPO_ROOT" && cargo build --release --locked -p zipee-engine --target "$target")
+    SLICES+=("$REPO_ROOT/target/$target/release/libzipee_engine.a")
+  else
+    if [[ "$target" == "$HOST_TARGET" ]]; then
+      die "the host Rust target $HOST_TARGET is not installed; run: rustup target add $HOST_TARGET"
+    fi
+    warn "  skipping $target (not installed); the app will be single-architecture"
+  fi
+done
+
+[[ ${#SLICES[@]} -ge 1 ]] || die "no archive core was built"
+
+LIB="$BUILD_DIR/libzipee_engine.a"
+rm -f "$LIB"
+lipo -create "${SLICES[@]}" -output "$LIB"
+log "archive core: $(lipo -archs "$LIB")"
 
 # --- app bundle -------------------------------------------------------------
+
+
 
 log "Assembling $APP_NAME.app"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
@@ -120,19 +152,24 @@ char *zipee_version(void);
 #endif
 HEADER
 
-mapfile -t SWIFT_SOURCES < <(find "$REPO_ROOT/macos/Zipee" -name '*.swift')
+# macOS still ships bash 3.2 as /bin/bash, which has no `mapfile`.
+SWIFT_SOURCES=()
+while IFS= read -r line; do
+  SWIFT_SOURCES+=("$line")
+done < <(find "$REPO_ROOT/macos/Zipee" -name '*.swift' | sort)
+[[ ${#SWIFT_SOURCES[@]} -gt 0 ]] || die "no Swift sources found under macos/Zipee"
 
 # -warnings-as-errors is deliberate: a warning in a shipping app is a defect
 # that will not be caught later, and there is no separate review step here.
 xcrun swiftc \
   -O \
-  -target "$(uname -m)-apple-darwin13.0" \
+  -target "${HOST_ARCH}-apple-darwin${DEPLOYMENT_TARGET_NUMBER}" \
   -sdk "$(xcrun --show-sdk-path --sdk macosx)" \
   -import-objc-header "$BUILD_DIR/ZipeeEngine.h" \
-  -L "$REPO_ROOT/target/release" \
+  -L "$BUILD_DIR" \
   -lzipee_engine \
   -framework SwiftUI -framework AppKit -framework UniformTypeIdentifiers \
-  -Xlinker -force_load -Xlinker "$REPO_ROOT/target/release/libzipee_engine.a" \
+  -Xlinker -force_load -Xlinker "$LIB" \
   -Xlinker -dead_strip \
   -warnings-as-errors \
   -o "$CONTENTS/MacOS/$APP_NAME" \
