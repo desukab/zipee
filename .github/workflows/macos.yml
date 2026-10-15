@@ -89,14 +89,17 @@ jobs:
               echo "  ABSENT:  $fw"
             fi
           done
-          echo "--- FSKit headers declaring a file-system module ---"
-          if [[ -d "$sdk/System/Library/Frameworks/FSKit.framework/Headers" ]]; then
-            grep -rhoE 'FSUnaryFileSystem[A-Za-z]*|UnaryFileSystemExtension[A-Za-z]*' \
-              "$sdk/System/Library/Frameworks/FSKit.framework/Headers" 2>/dev/null \
-              | sort -u | head -20 || echo "  (none found)"
-          else
-            echo "  FSKit.framework has no Headers directory"
-          fi
+          echo "--- how FSKit exposes its API ---"
+          fskit="$sdk/System/Library/Frameworks/FSKit.framework"
+          echo "  ObjC Headers dir: $([[ -d "$fskit/Headers" ]] && echo present || echo absent)"
+          echo "  Modules dir:       $([[ -d "$fskit/Modules" ]] && echo present || echo absent)"
+          echo "  .swiftinterface files:"
+          find "$fskit" -name '*.swiftinterface' 2>/dev/null | head -5 | sed 's/^/    /' \
+            || true
+          echo "  file-system-module symbols found anywhere in the framework:"
+          find "$fskit" -type f \( -name '*.swiftinterface' -o -name '*.h' \) \
+            -exec grep -hoE 'FSUnaryFileSystem[A-Za-z]*|UnaryFileSystemExtension[A-Za-z]*' {} + \
+            2>/dev/null | sort -u | head -20 | sed 's/^/    /' || true
 
       - name: Cache cargo
         uses: actions/cache@v4

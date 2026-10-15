@@ -156,7 +156,10 @@ final class ArchiveSession: ObservableObject {
     var visibleItems: [BrowseItem] {
         let prefix = location.path
         let directChildren = entries.filter { entry in
-            guard let parent = (entry.rawName as NSString).deletingLastPathComponent else {
+            // `deletingLastPathComponent` returns a String, not an Optional:
+            // it is empty for a member at the archive root.
+            let parent = (entry.rawName as NSString).deletingLastPathComponent
+            guard !parent.isEmpty else {
                 return prefix.isEmpty && !entry.rawName.contains("/")
             }
             guard parent == prefix else { return false }
