@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Zipee</string>
+	<key>CFBundleExecutable</key>
+	<string>Zipee</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.zipee.Zipee</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Zipee</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__BUILD__</string>
+
+	<!-- Zipee declares itself an *alternate* handler for every archive type it
+	     understands. It never claims to be the default, so Archive Utility keeps
+	     working and the user stays in control of what double-click does. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key><string>ZIP Archive</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array><string>public.zip-archive</string></array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>TAR Archive</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array><string>public.tar-archive</string></array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key><string>Compressed Archive</string>
+			<key>CFBundleTypeRole</key><string>Viewer</string>
+			<key>LSHandlerRank</key><string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.gnu.gnu-zip-archive</string>
+				<string>public.bzip2-archive</string>
+				<string>org.tukaani.xz-archive</string>
+				<string>org.tukaani.tar-xz-archive</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+
+	<!-- Finder's Services menu: "Extract with Zipee". -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMessage</key><string>extractArchives</string>
+			<key>NSPortName</key><string>Zipee</string>
+			<key>NSMenuItem</key>
+			<dict><key>default</key><string>Extract with Zipee</string></dict>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSApplicationIdentifier</key><string>com.apple.finder</string>
+			</dict>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>public.tar-archive</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSHumanReadableCopyright</key>
+	<string>Zipee. Licensed under MIT OR Apache-2.0.</string>
+</dict>
+</plist>

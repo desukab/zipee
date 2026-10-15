@@ -153,8 +153,8 @@ fn materialise(
 ) -> Result<Vec<u8>> {
     use std::io::Write;
     let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     let mut written: u64 = 0;
     for (name, item) in plan {
@@ -181,11 +181,9 @@ fn materialise(
         }
         written = written.saturating_add(data.len() as u64);
         if written > budget.max_total_bytes {
-            return Err(Error::Budget(
-                crate::security::BudgetExceeded::TotalBytes {
-                    limit: budget.max_total_bytes,
-                },
-            ));
+            return Err(Error::Budget(crate::security::BudgetExceeded::TotalBytes {
+                limit: budget.max_total_bytes,
+            }));
         }
         out.start_file(name.as_str(), opts)
             .map_err(|e| Error::Corrupt(format!("writing {name:?}: {e}")))?;
@@ -217,8 +215,7 @@ fn install(bytes: &[u8], destination: &Path) -> Result<()> {
         std::fs::create_dir_all(parent).ctx_err()?;
     }
     let tmp = crate::zip_archive::temp_sibling(destination);
-    std::fs::write(&tmp, bytes)
-        .map_err(|e| Error::io("writing replacement archive", e))?;
+    std::fs::write(&tmp, bytes).map_err(|e| Error::io("writing replacement archive", e))?;
     if let Err(e) = std::fs::rename(&tmp, destination) {
         // Leave no debris if the swap fails.
         let _ = std::fs::remove_file(&tmp);
@@ -330,7 +327,11 @@ mod tests {
     fn e(name: &str, unsafe_: bool) -> ArchiveEntry {
         ArchiveEntry {
             raw_name: name.into(),
-            path: if unsafe_ { None } else { sanitize_member_path(name).ok() },
+            path: if unsafe_ {
+                None
+            } else {
+                sanitize_member_path(name).ok()
+            },
             path_violation: if unsafe_ {
                 Some(crate::security::PathViolation::Traversal)
             } else {
@@ -351,8 +352,14 @@ mod tests {
     fn plan_adds_and_replaces() {
         let entries = vec![e("a.txt", false), e("b.txt", false)];
         let edits = vec![
-            MemberEdit::Replace { name: "a.txt".into(), data: b"new".to_vec() },
-            MemberEdit::Add { path: sanitize_member_path("c.txt").unwrap(), data: b"x".to_vec() },
+            MemberEdit::Replace {
+                name: "a.txt".into(),
+                data: b"new".to_vec(),
+            },
+            MemberEdit::Add {
+                path: sanitize_member_path("c.txt").unwrap(),
+                data: b"x".to_vec(),
+            },
         ];
         let r = plan_edits(&entries, &edits);
         assert_eq!(r.replaced, vec!["a.txt"]);
@@ -365,7 +372,9 @@ mod tests {
     fn plan_deletes_and_renames() {
         let entries = vec![e("a.txt", false), e("b.txt", false)];
         let edits = vec![
-            MemberEdit::Delete { name: "a.txt".into() },
+            MemberEdit::Delete {
+                name: "a.txt".into(),
+            },
             MemberEdit::Rename {
                 from: "b.txt".into(),
                 to: sanitize_member_path("d/b.txt").unwrap(),
@@ -379,7 +388,9 @@ mod tests {
     #[test]
     fn plan_ignores_edits_for_absent_members() {
         let entries = vec![e("a.txt", false)];
-        let edits = vec![MemberEdit::Delete { name: "nope.txt".into() }];
+        let edits = vec![MemberEdit::Delete {
+            name: "nope.txt".into(),
+        }];
         let r = plan_edits(&entries, &edits);
         assert!(r.deleted.is_empty());
         assert_eq!(r.unchanged, 1);
@@ -395,10 +406,7 @@ mod tests {
     #[test]
     fn refuses_in_place_write() {
         let p = Path::new("/tmp/x.zip");
-        assert_eq!(
-            crate::archive::same_file(p, p),
-            true
-        );
+        assert!(crate::archive::same_file(p, p));
     }
 
     #[test]

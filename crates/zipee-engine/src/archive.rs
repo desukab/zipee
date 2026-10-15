@@ -67,11 +67,7 @@ pub trait ArchiveAccess: std::any::Any + 'static {
     /// Implementations that support editing must go through
     /// [`ArchiveAccess::write_member_to`] so the atomic-replacement rules
     /// apply.
-    fn replace_entry(
-        &mut self,
-        _name: &str,
-        _data: &[u8],
-    ) -> Result<()> {
+    fn replace_entry(&mut self, _name: &str, _data: &[u8]) -> Result<()> {
         Err(crate::error::Error::Unsupported(format!(
             "{} archives cannot be edited by Zipee yet",
             self.format()
@@ -98,8 +94,9 @@ pub trait ArchiveAccess: std::any::Any + 'static {
         let tmp = crate::zip_archive::temp_sibling(destination);
         std::fs::write(&tmp, &bytes).ctx_err("writing replacement archive")?;
         // Validate the replacement before it replaces anything.
-        let check = crate::zip_archive::ZipArchive::from_bytes(bytes)
-            .map_err(|e| crate::error::Error::Corrupt(format!("replacement failed validation: {e}")))?;
+        let check = crate::zip_archive::ZipArchive::from_bytes(bytes).map_err(|e| {
+            crate::error::Error::Corrupt(format!("replacement failed validation: {e}"))
+        })?;
         drop(check);
         std::fs::rename(&tmp, destination).ctx_err("installing replacement archive")?;
         Ok(())
@@ -171,11 +168,7 @@ impl ArchiveAccess for Box<dyn ArchiveAccess> {
     fn vfs(&mut self) -> Result<Vfs> {
         (**self).vfs()
     }
-    fn read_entry(
-        &mut self,
-        name: &str,
-        passwords: &mut dyn PasswordSource,
-    ) -> Result<Vec<u8>> {
+    fn read_entry(&mut self, name: &str, passwords: &mut dyn PasswordSource) -> Result<Vec<u8>> {
         (**self).read_entry(name, passwords)
     }
     fn verify(

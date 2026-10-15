@@ -46,12 +46,17 @@ pub struct ZipeeBytes {
 impl ZipeeBytes {
     /// Hand the `Vec`'s allocation to the caller.
     ///
-    /// `into_raw_parts` *forgets* the vector, so the allocation is not freed
-    /// when this function returns; [`zipee_bytes_free`] gives it back exactly
-    /// once. Using `as_mut_ptr` here would leak a double free instead.
+    /// `ManuallyDrop` *forgets* the vector, so the allocation is not freed when
+    /// this function returns; [`zipee_bytes_free`] gives it back exactly once.
+    /// Letting the `Vec` drop here would be a double free; `into_raw_parts`
+    /// would work but needs Rust 1.93, above the engine's declared MSRV.
     fn from_vec(v: Vec<u8>) -> Self {
-        let (data, len, capacity) = v.into_raw_parts();
-        Self { data, len, capacity }
+        let mut v = std::mem::ManuallyDrop::new(v);
+        Self {
+            data: v.as_mut_ptr(),
+            len: v.len(),
+            capacity: v.capacity(),
+        }
     }
 
     fn empty() -> Self {
@@ -108,7 +113,13 @@ pub struct ZipeeEntry {
 /// Returns null on failure. `error_out`, when non-null, receives an owned
 /// message the caller must free with [`zipee_string_free`].
 #[no_mangle]
-pub unsafe extern "C" fn zipee_open(path: *const c_char, error_out: *mut *mut c_char) -> *mut ZipeeArchive {
+/// # Safety
+/// `path` must be a valid NUL-terminated C string or null, and `error_out`
+/// must be null or point to writable storage for one pointer.
+pub unsafe extern "C" fn zipee_open(
+    path: *const c_char,
+    error_out: *mut *mut c_char,
+) -> *mut ZipeeArchive {
     catch_unwind(AssertUnwindSafe(|| {
         let Some(path) = (unsafe { cstr(path) }) else {
             unsafe { set_error(error_out, "path is not valid UTF-8") };
@@ -127,6 +138,9 @@ pub unsafe extern "C" fn zipee_open(path: *const c_char, error_out: *mut *mut c_
 
 /// Close an archive. Safe to call with null.
 #[no_mangle]
+/// # Safety
+/// `handle` must be null, or a pointer returned by [`zipee_open`] that has not
+/// already been closed. Closing twice is a double free.
 pub unsafe extern "C" fn zipee_close(handle: *mut ZipeeArchive) {
     if handle.is_null() {
         return;
@@ -138,6 +152,8 @@ pub unsafe extern "C" fn zipee_close(handle: *mut ZipeeArchive) {
 
 /// Read the archive's summary statistics.
 #[no_mangle]
+/// # Safety
+/// `handle` must be a live archive handle and `error_out` null or writable.
 pub unsafe extern "C" fn zipee_stats(
     handle: *mut ZipeeArchive,
     error_out: *mut *mut c_char,
@@ -194,6 +210,9 @@ pub unsafe extern "C" fn zipee_stats(
 /// `*count` receives the number of entries written into `out`. The caller owns
 /// the returned array and each name in it.
 #[no_mangle]
+/// # Safety
+/// `handle` must be live; `out` must have room for `capacity` elements and
+/// `count_out` must be writable.
 pub unsafe extern "C" fn zipee_entries(
     handle: *mut ZipeeArchive,
     out: *mut ZipeeEntry,
@@ -246,6 +265,9 @@ pub unsafe extern "C" fn zipee_entries(
 ///
 /// The caller owns the returned buffer and frees it with [`zipee_bytes_free`].
 #[no_mangle]
+/// # Safety
+/// `name` must be a valid C string. The returned buffer is owned by the
+/// caller and must be released with [`zipee_bytes_free`].
 pub unsafe extern "C" fn zipee_read_entry(
     handle: *mut ZipeeArchive,
     name: *const c_char,
@@ -276,6 +298,9 @@ pub unsafe extern "C" fn zipee_read_entry(
 /// Returns 0 on success and a negative value on failure. `report_json`, when
 /// non-null, receives an owned JSON summary the caller must free.
 #[no_mangle]
+/// # Safety
+/// `spec` and `destination` must be valid C strings; `report_json` must be
+/// null or writable.
 pub unsafe extern "C" fn zipee_extract(
     handle: *mut ZipeeArchive,
     spec: *const c_char,
@@ -333,6 +358,9 @@ pub unsafe extern "C" fn zipee_extract(
 
 /// Free a buffer returned by [`zipee_read_entry`].
 #[no_mangle]
+/// # Safety
+/// `bytes` must be a value returned by [`zipee_read_entry`] that has not
+/// already been freed.
 pub unsafe extern "C" fn zipee_bytes_free(bytes: ZipeeBytes) {
     if bytes.data.is_null() {
         return;
@@ -344,6 +372,9 @@ pub unsafe extern "C" fn zipee_bytes_free(bytes: ZipeeBytes) {
 
 /// Free a string returned by any `zipee_*` function.
 #[no_mangle]
+/// # Safety
+/// `s` must be null or a pointer returned by this module that has not already
+/// been freed.
 pub unsafe extern "C" fn zipee_string_free(s: *mut c_char) {
     if s.is_null() {
         return;
@@ -366,7 +397,10 @@ unsafe fn cstr(p: *const c_char) -> Option<String> {
     if p.is_null() {
         return None;
     }
-    unsafe { CStr::from_ptr(p) }.to_str().ok().map(|s| s.to_string())
+    unsafe { CStr::from_ptr(p) }
+        .to_str()
+        .ok()
+        .map(|s| s.to_string())
 }
 
 /// Borrow an archive handle.
@@ -496,8 +530,9 @@ mod tests {
         let rc = unsafe { zipee_entries(handle, storage.as_mut_ptr(), 8, &mut n, &mut err) };
         assert_eq!(rc, 0);
         assert_eq!(n, 2);
-        for i in 0..n {
-            unsafe { zipee_string_free(storage[i].name) };
+        for slot in storage.iter_mut().take(n) {
+            unsafe { zipee_string_free(slot.name) };
+            slot.name = std::ptr::null_mut();
         }
         unsafe { zipee_close(handle) };
     }
@@ -552,7 +587,10 @@ mod tests {
         unsafe { zipee_string_free(report) };
 
         assert_eq!(std::fs::read(out.join("sub/b.txt")).unwrap(), b"beta");
-        assert!(!out.join("a.txt").exists(), "selection must not over-extract");
+        assert!(
+            !out.join("a.txt").exists(),
+            "selection must not over-extract"
+        );
 
         unsafe { zipee_close(handle) };
     }

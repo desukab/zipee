@@ -177,11 +177,18 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), Error> {
     match cli.command {
         Command::Info { archive } => cmd_info(&archive),
-        Command::List { archive, tree, path, filter } => {
-            cmd_list(&archive, tree, &path, filter.as_deref())
-        }
+        Command::List {
+            archive,
+            tree,
+            path,
+            filter,
+        } => cmd_list(&archive, tree, &path, filter.as_deref()),
         Command::Stat { archive, entry } => cmd_stat(&archive, &entry),
-        Command::Cat { archive, entry, output } => cmd_cat(&archive, &entry, output.as_deref()),
+        Command::Cat {
+            archive,
+            entry,
+            output,
+        } => cmd_cat(&archive, &entry, output.as_deref()),
         Command::Verify { archive, password } => cmd_verify(&archive, password.as_deref()),
         Command::Extract {
             archive,
@@ -190,7 +197,14 @@ fn run(cli: Cli) -> Result<(), Error> {
             max_ratio,
             max_bytes,
             verbose,
-        } => cmd_extract(&archive, &destination, &selection, max_ratio, max_bytes, verbose),
+        } => cmd_extract(
+            &archive,
+            &destination,
+            &selection,
+            max_ratio,
+            max_bytes,
+            verbose,
+        ),
         Command::Create { archive, inputs } => cmd_create(&archive, &inputs),
         Command::Edit {
             archive,
@@ -208,7 +222,11 @@ fn cmd_info(archive: &Path) -> Result<(), Error> {
     println!("format:    {format}");
     println!(
         "writable:  {}",
-        if format.supports_writing() { "yes" } else { "no" }
+        if format.supports_writing() {
+            "yes"
+        } else {
+            "no"
+        }
     );
     println!("size:      {}", human_bytes(fs_size(archive)));
 
@@ -281,7 +299,7 @@ fn cmd_list(archive: &Path, tree: bool, path: &str, filter: Option<&str>) -> Res
                 continue;
             }
         }
-        print_node(&node);
+        print_node(node);
         count += 1;
     }
     if count == 0 && filter.is_some() {
@@ -317,16 +335,16 @@ fn print_node(node: &Node) {
 fn cmd_stat(archive: &Path, entry: &str) -> Result<(), Error> {
     let mut a = open_any(archive)?;
     let entries = a.entries()?;
-    let Some(found) = entries.iter().find(|e| e.raw_name == entry || e.key() == entry) else {
+    let Some(found) = entries
+        .iter()
+        .find(|e| e.raw_name == entry || e.key() == entry)
+    else {
         return Err(Error::NoSuchEntry(entry.to_string()));
     };
 
     println!("name:            {}", found.raw_name);
     println!("kind:            {:?}", found.kind);
-    println!(
-        "size:            {}",
-        human_bytes(found.uncompressed_size)
-    );
+    println!("size:            {}", human_bytes(found.uncompressed_size));
     println!("compressed:      {} bytes", found.compressed_size);
     println!(
         "ratio:           {}",
@@ -339,9 +357,9 @@ fn cmd_stat(archive: &Path, entry: &str) -> Result<(), Error> {
     println!("encryption:      {:?}", found.encryption);
     println!(
         "modified:        {:?}",
-        found.modified
-            .map(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-            .flatten()
+        found
+            .modified
+            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
     );
     println!(
         "unix mode:       {}",
@@ -377,7 +395,8 @@ fn cmd_cat(archive: &Path, entry: &str, output: Option<&Path>) -> Result<(), Err
     let data = a.read_entry(entry, &mut NoPassword)?;
     match output {
         Some(p) => {
-            std::fs::write(p, &data).map_err(|e| Error::io(format!("writing {}", p.display()), e))?;
+            std::fs::write(p, &data)
+                .map_err(|e| Error::io(format!("writing {}", p.display()), e))?;
             eprintln!("wrote {} ({})", p.display(), human_bytes(data.len() as u64));
         }
         None => {
@@ -416,7 +435,10 @@ fn cmd_verify(archive: &Path, password: Option<&str>) -> Result<(), Error> {
             )
         }
     );
-    println!("skipped:  {} (encrypted, no password)", report.encrypted_pending.len());
+    println!(
+        "skipped:  {} (encrypted, no password)",
+        report.encrypted_pending.len()
+    );
     println!("unsafe:   {}", report.unsafe_entries.len());
 
     if !report.failed.is_empty() || !report.unsafe_entries.is_empty() {
@@ -576,8 +598,7 @@ fn cmd_edit(
         let (name, file) = spec.split_once('=').ok_or_else(|| {
             Error::Unsupported(format!("--replace wants NAME=FILE, got {spec:?}"))
         })?;
-        let data = std::fs::read(file)
-            .map_err(|e| Error::io(format!("reading {file}"), e))?;
+        let data = std::fs::read(file).map_err(|e| Error::io(format!("reading {file}"), e))?;
         edits.push(MemberEdit::Replace {
             name: name.to_string(),
             data,
@@ -606,7 +627,10 @@ fn cmd_edit(
     // The engine refuses in-place writes, which is exactly what we want here:
     // `--output` is mandatory and the source is never touched.
     let mut a = open_any(archive)?;
-    let Some(zip) = a.as_any_mut().downcast_mut::<zipee_engine::zip_archive::ZipArchive>() else {
+    let Some(zip) = a
+        .as_any_mut()
+        .downcast_mut::<zipee_engine::zip_archive::ZipArchive>()
+    else {
         return Err(Error::Unsupported(format!(
             "editing is only supported for zip archives; this is {}",
             a.format()

@@ -68,7 +68,7 @@ pub use security::{
     sanitize_member_path, BudgetExceeded, ExtractionBudget, PathViolation, SafeMemberPath,
 };
 pub use vfs::{Node, Vfs};
-pub use writeback::{WriteReport};
+pub use writeback::WriteReport;
 
 /// Open any supported archive, detecting the container from its content.
 pub fn open_any(path: &std::path::Path) -> Result<Box<dyn ArchiveAccess>> {

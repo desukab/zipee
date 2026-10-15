@@ -58,7 +58,7 @@ impl RawMember {
     }
 
     /// Record a symlink's mode, to exercise link handling.
-    pub fn as_symlink(mut self) -> Self {
+    pub fn into_symlink(mut self) -> Self {
         self.mode = 0o120777;
         self
     }
@@ -67,7 +67,7 @@ impl RawMember {
     ///
     /// This is enough to exercise the engine's *routing* of encrypted members:
     /// it will never try to decrypt, only refuse or prompt.
-    pub fn as_encrypted(mut self) -> Self {
+    pub fn into_encrypted(mut self) -> Self {
         self.flags |= 0x0001;
         self.crc = 0;
         self
@@ -126,7 +126,7 @@ pub fn raw_zip(members: &[RawMember]) -> Vec<u8> {
         central.extend_from_slice(&u16le(0)); // comment
         central.extend_from_slice(&u16le(0)); // disk number
         central.extend_from_slice(&u16le(0)); // internal attrs
-        central.extend_from_slice(&u32le((m.mode << 16) as u32));
+        central.extend_from_slice(&u32le(m.mode << 16));
         central.extend_from_slice(&u32le(offset));
         central.extend_from_slice(name);
 

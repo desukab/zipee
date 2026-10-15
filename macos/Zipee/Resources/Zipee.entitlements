@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Zipee ships sandboxed. These are the minimum entitlements the product
+	     actually needs, and each one is here for a stated reason:
+
+	     - app-sandbox: default-deny; everything below is an explicit grant.
+	     - user-selected.read-write: the user picks the archive and the folder
+	       to extract into via an open/save panel, which is the only way Zipee
+	       ever touches a path it was not handed.
+	     - user-selected.executable: Quick Look previews of executable members.
+	     - network.client: only for checking for app updates.
+	     - automation.apple-events + temporary-exception for com.apple.finder:
+	       to reveal an extracted item in the Finder window the user came from.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.executable</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.temporary-exception.apple-events</key>
+	<array>
+		<string>com.apple.finder</string>
+	</array>
+</dict>
+</plist>

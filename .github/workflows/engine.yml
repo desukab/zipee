@@ -1,0 +1,123 @@
+name: engine
+
+# The archive engine is portable and has no macOS dependency, so it is tested
+# on every push. This is where a security regression is caught: the adversarial
+# suite in crates/zipee-engine/tests/security.rs runs here, not on a release
+# branch.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (pinned toolchain)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: engine-${{ matrix.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: engine-${{ matrix.os }}-
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Unit and integration tests
+        run: cargo test --workspace --locked -- --test-threads=1
+
+      # Security tests get their own job so a failure names itself clearly
+      # instead of hiding inside a wall of test names.
+      - name: Security suite
+        run: cargo test -p zipee-engine --test security --locked -- --test-threads=1 --nocapture
+
+      - name: Build release
+        run: cargo build --workspace --release --locked
+
+  cli-smoke:
+    name: CLI end-to-end
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: engine-cli-${{ hashFiles('Cargo.lock') }}
+          restore-keys: engine-cli-
+
+      - name: Build
+        run: cargo build --release --locked -p zipee-cli
+
+      # Exercises the CLI as a user would, and asserts the exit-code contract
+      # that scripts depend on.
+      - name: Round-trip a real archive
+        run: |
+          set -euo pipefail
+          Zipee=./target/release/zipee
+          work="$(mktemp -d)"
+          mkdir -p "$work/src/nested/deep"
+          echo "hello" > "$work/src/a.txt"
+          head -c 20000 /dev/urandom > "$work/src/nested/deep/blob.bin"
+
+          "$Zipee" create "$work/demo.zip" "$work/src"
+          "$Zipee" info "$work/demo.zip" | tee "$work/info.txt"
+          grep -q '^format:    zip$' "$work/info.txt"
+          "$Zipee" list "$work/demo.zip" --tree | tee "$work/tree.txt"
+          grep -q 'src/' "$work/tree.txt"
+          "$Zipee" verify "$work/demo.zip" | tee "$work/verify.txt"
+          grep -q '^failed:   0$' "$work/verify.txt"
+          "$Zipee" extract "$work/demo.zip" -d "$work/out"
+          test -f "$work/out/src/nested/deep/blob.bin"
+
+          echo "--- security: traversal must be refused with exit 5 ---"
+          set +e
+          "$Zipee" extract "$work/demo.zip" '../evil' -d "$work/evil"
+          code=$?
+          set -e
+          test "$code" -eq 5 || { echo "expected exit 5, got $code"; exit 1; }
+
+          echo "--- security: in-place edit must be refused with exit 1 ---"
+          set +e
+          "$Zipee" edit "$work/demo.zip" -o "$work/demo.zip" --delete src/a.txt
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "expected exit 1, got $code"; exit 1; }
+
+      - name: Verify the CLI is reproducible across the run
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          mkdir -p "$work/src"
+          echo deterministic > "$work/src/file.txt"
+          a=$(./target/release/zipee create "$work/a.zip" "$work/src"; sha256sum "$work/a.zip" | cut -d' ' -f1)
+          b=$(./target/release/zipee create "$work/b.zip" "$work/src"; sha256sum "$work/b.zip" | cut -d' ' -f1)
+          test "$a" = "$b" || { echo "archives are not reproducible: $a vs $b"; exit 1; }

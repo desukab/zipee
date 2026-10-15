@@ -140,15 +140,23 @@ impl Vfs {
             map.entry(parent).or_default().push(key);
         }
 
-        for (_, kids) in map.iter_mut() {
+        for kids in map.values_mut() {
             kids.sort_by(|a, b| {
                 let na = self.nodes.get(a).map(|n| n.kind);
                 let nb = self.nodes.get(b).map(|n| n.kind);
                 let da = matches!(na, Some(EntryKind::Directory));
                 let db = matches!(nb, Some(EntryKind::Directory));
                 db.cmp(&da).then_with(|| {
-                    let la = self.nodes.get(a).map(|n| n.name.to_lowercase()).unwrap_or_default();
-                    let lb = self.nodes.get(b).map(|n| n.name.to_lowercase()).unwrap_or_default();
+                    let la = self
+                        .nodes
+                        .get(a)
+                        .map(|n| n.name.to_lowercase())
+                        .unwrap_or_default();
+                    let lb = self
+                        .nodes
+                        .get(b)
+                        .map(|n| n.name.to_lowercase())
+                        .unwrap_or_default();
                     la.cmp(&lb).then_with(|| a.cmp(b))
                 })
             });
@@ -184,7 +192,9 @@ impl Vfs {
 
     /// True when `path` names a directory in the tree.
     pub fn is_directory(&self, path: &str) -> bool {
-        self.get(path).map(|n| n.kind == EntryKind::Directory).unwrap_or(false)
+        self.get(path)
+            .map(|n| n.kind == EntryKind::Directory)
+            .unwrap_or(false)
     }
 
     /// Resolve a user-supplied relative path, e.g. from a search box.
@@ -376,7 +386,11 @@ mod tests {
         let vfs = Vfs::from_entries(&[file("a/b/c.txt"), file("a/b/d.txt")]);
         assert!(vfs.is_directory("a"));
         assert!(vfs.is_directory("a/b"));
-        let kids: Vec<&str> = vfs.children("a/b").iter().map(|n| n.name.as_str()).collect();
+        let kids: Vec<&str> = vfs
+            .children("a/b")
+            .iter()
+            .map(|n| n.name.as_str())
+            .collect();
         assert_eq!(kids, vec!["c.txt", "d.txt"]);
         assert!(vfs.get("a").unwrap().implicit);
     }

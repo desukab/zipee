@@ -171,9 +171,17 @@ fn entry_from_header(header: &[u8], name: &str, prefix: &str) -> Option<ArchiveE
         path,
         path_violation: violation,
         kind,
-        uncompressed_size: if kind == EntryKind::Directory { 0 } else { size },
+        uncompressed_size: if kind == EntryKind::Directory {
+            0
+        } else {
+            size
+        },
         // tar has no per-member compression
-        compressed_size: if kind == EntryKind::Directory { 0 } else { size },
+        compressed_size: if kind == EntryKind::Directory {
+            0
+        } else {
+            size
+        },
         compression: Compression::Stored,
         encryption: Encryption::None,
         modified: std::time::UNIX_EPOCH.checked_add(std::time::Duration::from_secs(mtime)),
@@ -309,11 +317,7 @@ impl ArchiveAccess for TarArchive {
         Ok(Vfs::from_entries(&self.entries()?))
     }
 
-    fn read_entry(
-        &mut self,
-        name: &str,
-        _passwords: &mut dyn PasswordSource,
-    ) -> Result<Vec<u8>> {
+    fn read_entry(&mut self, name: &str, _passwords: &mut dyn PasswordSource) -> Result<Vec<u8>> {
         self.inner
             .seek(std::io::SeekFrom::Start(0))
             .ctx("rewinding tar")?;
@@ -464,9 +468,19 @@ mod tests {
             ("b.txt", 0, b'0', "", b"bravo"),
         ]);
         let mut a = TarArchive::from_bytes(tar).unwrap();
-        assert_eq!(a.read_entry("a.txt", &mut crate::entry::NoPassword).unwrap(), b"alpha");
-        assert_eq!(a.read_entry("b.txt", &mut crate::entry::NoPassword).unwrap(), b"bravo");
-        assert!(a.read_entry("missing", &mut crate::entry::NoPassword).is_err());
+        assert_eq!(
+            a.read_entry("a.txt", &mut crate::entry::NoPassword)
+                .unwrap(),
+            b"alpha"
+        );
+        assert_eq!(
+            a.read_entry("b.txt", &mut crate::entry::NoPassword)
+                .unwrap(),
+            b"bravo"
+        );
+        assert!(a
+            .read_entry("missing", &mut crate::entry::NoPassword)
+            .is_err());
     }
 
     #[test]
@@ -475,10 +489,7 @@ mod tests {
         // Write a well-formed but wrong octal checksum. An all-NUL field is the
         // documented "unknown checksum" escape hatch and is deliberately allowed.
         let correct: u32 = {
-            let sum: u32 = tar[148..156]
-                .iter()
-                .map(|b| *b as u32)
-                .sum();
+            let sum: u32 = tar[148..156].iter().map(|b| *b as u32).sum();
             sum
         };
         let wrong = format!("{:06o}\0 ", correct.wrapping_add(1));
@@ -527,7 +538,10 @@ mod tests {
 
     #[test]
     fn vfs_builds_a_tree() {
-        let tar = build_tar(&[("dir/a.txt", 0, b'0', "", b"a"), ("dir/b.txt", 0, b'0', "", b"bb")]);
+        let tar = build_tar(&[
+            ("dir/a.txt", 0, b'0', "", b"a"),
+            ("dir/b.txt", 0, b'0', "", b"bb"),
+        ]);
         let mut a = TarArchive::from_bytes(tar).unwrap();
         let vfs = a.vfs().unwrap();
         assert!(vfs.is_directory("dir"));

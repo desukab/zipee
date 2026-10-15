@@ -114,7 +114,9 @@ impl ArchiveEntry {
         if self.uncompressed_size == 0 {
             return None;
         }
-        Some(self.compressed_size * 100 / self.uncompressed_size)
+        self.compressed_size
+            .checked_mul(100)
+            .map(|v| v / self.uncompressed_size)
     }
 
     /// The sanitised path as a `/`-joined string, or the raw name if unsafe.
@@ -170,11 +172,10 @@ impl ArchiveStats {
 
     /// Overall compression ratio as a percentage in `0..=100`.
     pub fn ratio_percent(&self) -> u64 {
-        if self.uncompressed_bytes == 0 {
-            0
-        } else {
-            self.compressed_bytes * 100 / self.uncompressed_bytes
-        }
+        self.compressed_bytes
+            .checked_mul(100)
+            .and_then(|v| v.checked_div(self.uncompressed_bytes))
+            .unwrap_or(0)
     }
 
     /// Human-readable total size, e.g. `1.4 GB`.
@@ -395,18 +396,42 @@ mod tests {
 
     #[test]
     fn ratio_percent() {
-        assert_eq!(entry("a", EntryKind::File, 1000, 250).ratio_percent(), Some(25));
+        assert_eq!(
+            entry("a", EntryKind::File, 1000, 250).ratio_percent(),
+            Some(25)
+        );
         assert_eq!(entry("a", EntryKind::File, 0, 0).ratio_percent(), None);
-        assert_eq!(entry("a", EntryKind::File, 1000, 0).ratio_percent(), Some(0));
+        assert_eq!(
+            entry("a", EntryKind::File, 1000, 0).ratio_percent(),
+            Some(0)
+        );
     }
 
     #[test]
     fn progress_fraction() {
-        let p = Progress { done: 0, total: 0, bytes_done: 0, bytes_total: 0, current: String::new() };
+        let p = Progress {
+            done: 0,
+            total: 0,
+            bytes_done: 0,
+            bytes_total: 0,
+            current: String::new(),
+        };
         assert_eq!(p.fraction(), 1.0);
-        let p = Progress { done: 5, total: 10, bytes_done: 0, bytes_total: 0, current: String::new() };
+        let p = Progress {
+            done: 5,
+            total: 10,
+            bytes_done: 0,
+            bytes_total: 0,
+            current: String::new(),
+        };
         assert_eq!(p.fraction(), 0.5);
-        let p = Progress { done: 10, total: 10, bytes_done: 0, bytes_total: 0, current: String::new() };
+        let p = Progress {
+            done: 10,
+            total: 10,
+            bytes_done: 0,
+            bytes_total: 0,
+            current: String::new(),
+        };
         assert_eq!(p.fraction(), 1.0);
     }
 }

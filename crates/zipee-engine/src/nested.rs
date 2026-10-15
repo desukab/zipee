@@ -5,7 +5,6 @@
 //! temporary buffer, parses its index, and recurses — the rest of `photos.zip`
 //! is never decompressed.
 
-
 use crate::archive::ArchiveAccess;
 use crate::entry::{ArchiveEntry, PasswordSource};
 use crate::error::{Error, Result};
@@ -29,7 +28,9 @@ pub struct NestedPath {
 impl NestedPath {
     /// The root: no segments.
     pub fn root() -> Self {
-        Self { segments: Vec::new() }
+        Self {
+            segments: Vec::new(),
+        }
     }
 
     /// Descend into a member.
@@ -164,14 +165,17 @@ pub fn find_nested(archive: &mut dyn ArchiveAccess) -> Result<Vec<ArchiveEntry>>
 pub fn open_bytes(bytes: Vec<u8>) -> Result<Option<Box<dyn ArchiveAccess>>> {
     let head_len = bytes.len().min(512);
     match detect_bytes(&bytes[..head_len])? {
-        Format::Zip => Ok(Some(Box::new(crate::zip_archive::ZipArchive::from_bytes(bytes)?))),
-        Format::Tar => Ok(Some(Box::new(crate::tar_archive::TarArchive::from_bytes(bytes)?))),
+        Format::Zip => Ok(Some(Box::new(crate::zip_archive::ZipArchive::from_bytes(
+            bytes,
+        )?))),
+        Format::Tar => Ok(Some(Box::new(crate::tar_archive::TarArchive::from_bytes(
+            bytes,
+        )?))),
         other => Err(Error::Unsupported(format!(
             "Zipee can open zip and tar; these bytes are {other}"
         ))),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

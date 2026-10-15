@@ -56,7 +56,10 @@ impl Format {
 
     /// True when Zipee can list members without decoding the payload.
     pub fn supports_random_access(self) -> bool {
-        matches!(self, Self::Zip | Self::SevenZip | Self::Rar | Self::Tar | Self::Xar)
+        matches!(
+            self,
+            Self::Zip | Self::SevenZip | Self::Rar | Self::Tar | Self::Xar
+        )
     }
 
     /// True when Zipee can write or modify archives of this container.
@@ -109,10 +112,7 @@ const fn starts(hay: &[u8], needle: &[u8]) -> bool {
 /// no magic at offset 0 — the first bytes are the first file's name.
 pub fn detect_bytes(head: &[u8]) -> Result<Format, DetectError> {
     // ZIP: a local file header, an empty archive, or a spanned archive.
-    if starts(head, b"PK\x03\x04")
-        || starts(head, b"PK\x05\x06")
-        || starts(head, b"PK\x07\x08")
-    {
+    if starts(head, b"PK\x03\x04") || starts(head, b"PK\x05\x06") || starts(head, b"PK\x07\x08") {
         return Ok(Format::Zip);
     }
     // 7-Zip
@@ -200,8 +200,8 @@ pub fn from_extension(path: &Path) -> Option<Format> {
 pub fn looks_like_archive(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     const EXTS: &[&str] = &[
-        "zip", "7z", "rar", "tar", "gz", "tgz", "gzip", "bz2", "tbz", "tbz2", "bzip2", "xz",
-        "txz", "zst", "tzst", "zstd",
+        "zip", "7z", "rar", "tar", "gz", "tgz", "gzip", "bz2", "tbz", "tbz2", "bzip2", "xz", "txz",
+        "zst", "tzst", "zstd",
     ];
     match lower.rsplit_once('.') {
         Some((_, ext)) => EXTS.contains(&ext),

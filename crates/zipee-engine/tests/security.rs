@@ -17,7 +17,7 @@ use std::path::Path;
 use zipee_engine::archive::{ArchiveAccess, MemberEdit};
 use zipee_engine::entry::{NoPassword, StaticPassword};
 use zipee_engine::error::Error;
-use zipee_engine::extract::{extract, CancelToken, MemberOutcome, Selection};
+use zipee_engine::extract::{extract, CancelToken, Selection};
 use zipee_engine::format::Format;
 use zipee_engine::security::ExtractionBudget;
 use zipee_engine::writeback::rewrite_zip;
@@ -151,6 +151,7 @@ fn windows_style_traversal_is_never_written() {
     let report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
     assert!(report.rejected >= 1, "{report:?}");
     assert_contained(&out, &["evil"]);
+    let _ = &report;
 }
 
 #[test]
@@ -161,7 +162,7 @@ fn nul_in_member_name_is_refused() {
     let out = dir.path().join("out");
 
     let mut a = ZipArchive::open(&p).unwrap();
-    let report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
+    let _report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
     // Whatever the reader made of the name, the only file on disk must be
     // inside the destination.
     assert_contained(&out, &["ok.txt.png", "ok.txt"]);
@@ -181,6 +182,7 @@ fn tar_traversal_is_never_written() {
     let report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
     assert!(report.rejected >= 1, "{report:?}");
     assert_contained(&out, &["evil"]);
+    let _ = &report;
     assert!(!dir.path().join("evil").exists());
 }
 
@@ -220,7 +222,7 @@ fn symlink_members_are_recognised_but_never_written() {
     let dir = tempfile::tempdir().unwrap();
     // A symlink member whose body is an absolute path. The engine must see it
     // as a link, show it, and refuse to create it on disk.
-    let bytes = raw_zip(&[RawMember::file("link", b"/etc/passwd").as_symlink()]);
+    let bytes = raw_zip(&[RawMember::file("link", b"/etc/passwd").into_symlink()]);
     let p = write_temp(dir.path(), "s.zip", &bytes);
     let out = dir.path().join("out");
 
@@ -259,7 +261,7 @@ fn symlink_followed_on_read_does_not_escape() {
     // inside the destination, because no link is ever created.
     let dir = tempfile::tempdir().unwrap();
     let bytes = raw_zip(&[
-        RawMember::file("link", b"../../elsewhere").as_symlink(),
+        RawMember::file("link", b"../../elsewhere").into_symlink(),
         RawMember::file("link/child.txt", b"payload"),
     ]);
     let p = write_temp(dir.path(), "linkattack.zip", &bytes);
@@ -281,16 +283,21 @@ fn high_ratio_member_is_refused_before_decompression() {
     // budget's 100:1 ceiling, and exactly the shape of a classic bomb.
     let big = vec![0u8; 8 * 1024 * 1024];
     let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-    let opts: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let opts: zip::write::FileOptions<'_, ()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     w.start_file("zeros.bin", opts).unwrap();
     w.write_all(&big).unwrap();
     let bytes = w.finish().unwrap().into_inner();
     let p = write_temp(dir.path(), "bomb.zip", &bytes);
 
     let mut a = ZipArchive::open(&p).unwrap();
-    let err = run_extract(&mut a, "*", &dir.path().join("out"), &ExtractionBudget::strict())
-        .expect_err("a bomb must be refused");
+    let err = run_extract(
+        &mut a,
+        "*",
+        &dir.path().join("out"),
+        &ExtractionBudget::strict(),
+    )
+    .expect_err("a bomb must be refused");
 
     match err {
         Error::Budget(b) => assert!(b.to_string().contains("ratio"), "got {b}"),
@@ -307,7 +314,7 @@ fn zero_compressed_size_with_content_is_refused() {
         "zero.zip",
         &zip_bytes(&[("x.bin", b"not actually empty")]),
     );
-    let mut a = ZipArchive::open(&p).unwrap();
+    let a = ZipArchive::open(&p).unwrap();
 
     // Force the pathological header directly through the budget API.
     let budget = ExtractionBudget::default();
@@ -345,8 +352,9 @@ fn entry_count_flood_is_bounded() {
 fn total_byte_ceiling_is_enforced() {
     let dir = tempfile::tempdir().unwrap();
     let chunk = vec![7u8; 4096];
-    let members: Vec<(String, Vec<u8>)> =
-        (0..64).map(|i| (format!("c{i}.bin"), chunk.clone())).collect();
+    let members: Vec<(String, Vec<u8>)> = (0..64)
+        .map(|i| (format!("c{i}.bin"), chunk.clone()))
+        .collect();
     let refs: Vec<(&str, &[u8])> = members
         .iter()
         .map(|(n, b)| (n.as_str(), b.as_slice()))
@@ -376,7 +384,10 @@ fn corrupt_checksum_is_reported_not_silently_accepted() {
     let p = write_temp(dir.path(), "corrupt.zip", &bytes);
 
     let mut a = ZipArchive::open(&p).unwrap();
-    assert_eq!(a.read_entry("data.txt", &mut NoPassword).unwrap(), b"original contents");
+    assert_eq!(
+        a.read_entry("data.txt", &mut NoPassword).unwrap(),
+        b"original contents"
+    );
 
     let err = a
         .read_entry("other.txt", &mut NoPassword)
@@ -400,8 +411,11 @@ fn corrupt_checksum_is_reported_not_silently_accepted() {
     let out = dir.path().join("out");
     let extract_report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
     assert_eq!(extract_report.failed, 1);
-    assert!(!out.join("other.txt").exists(), "corrupt data must not be written");
-    assert_eq!(out.join("data.txt").exists(), true);
+    assert!(
+        !out.join("other.txt").exists(),
+        "corrupt data must not be written"
+    );
+    assert!(out.join("data.txt").exists());
 }
 
 #[test]
@@ -623,7 +637,9 @@ fn writeback_produces_a_valid_archive_and_keeps_the_original_on_failure() {
         &src,
         &dst,
         &[
-            MemberEdit::Delete { name: "drop.txt".into() },
+            MemberEdit::Delete {
+                name: "drop.txt".into(),
+            },
             MemberEdit::Add {
                 path: zipee_engine::sanitize_member_path("new/added.txt").unwrap(),
                 data: b"added".to_vec(),
@@ -643,7 +659,12 @@ fn writeback_produces_a_valid_archive_and_keeps_the_original_on_failure() {
 
     // replacement is a valid archive with the expected contents
     let mut edited = ZipArchive::open(&dst).unwrap();
-    let names: Vec<String> = edited.entries().unwrap().iter().map(|e| e.raw_name.clone()).collect();
+    let names: Vec<String> = edited
+        .entries()
+        .unwrap()
+        .iter()
+        .map(|e| e.raw_name.clone())
+        .collect();
     assert!(names.contains(&"keep.txt".to_string()));
     assert!(!names.contains(&"drop.txt".to_string()));
     assert!(names.contains(&"new/added.txt".to_string()));
@@ -656,7 +677,10 @@ fn writeback_produces_a_valid_archive_and_keeps_the_original_on_failure() {
 #[test]
 fn writeback_drops_unsafe_members_instead_of_republishing_them() {
     let dir = tempfile::tempdir().unwrap();
-    let bytes = raw_zip(&[RawMember::file("safe.txt", b"ok"), RawMember::hostile("../evil.txt", b"pwned")]);
+    let bytes = raw_zip(&[
+        RawMember::file("safe.txt", b"ok"),
+        RawMember::hostile("../evil.txt", b"pwned"),
+    ]);
     let src = write_temp(dir.path(), "hostile.zip", &bytes);
     let dst = dir.path().join("clean.zip");
 
@@ -685,18 +709,18 @@ fn external_modification_is_detected() {
     std::thread::sleep(std::time::Duration::from_millis(1100));
 
     assert!(a.changed_on_disk());
-    assert!(matches!(a.ensure_unchanged(), Err(Error::ExternalModification)));
+    assert!(matches!(
+        a.ensure_unchanged(),
+        Err(Error::ExternalModification)
+    ));
 
     // A rewrite against a stale index must refuse rather than clobber.
     let dst = dir.path().join("out.zip");
-    let err = rewrite_zip(
-        &mut a,
-        &src,
-        &dst,
-        &[],
-        &ExtractionBudget::interactive(),
+    let err = rewrite_zip(&mut a, &src, &dst, &[], &ExtractionBudget::interactive());
+    assert!(
+        matches!(err, Err(Error::ExternalModification)),
+        "got {err:?}"
     );
-    assert!(matches!(err, Err(Error::ExternalModification)), "got {err:?}");
     assert!(!dst.exists(), "no output may be written from a stale index");
 }
 
@@ -783,6 +807,40 @@ fn aes_encrypted_archive_needs_a_password_and_accepts_the_right_one() {
     assert!(!report.is_healthy());
 }
 
+#[test]
+fn encrypted_member_is_flagged_and_never_written_without_a_password() {
+    // A structurally valid archive whose single member declares the encryption
+    // bit. The payload is not real ciphertext, which is exactly what makes this
+    // useful: it proves the engine routes on the *flag* and refuses, rather than
+    // handing undecryptable bytes to the filesystem.
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = raw_zip(&[
+        RawMember::file("secret.bin", b"plaintext in an encrypted shell").into_encrypted(),
+    ]);
+    let p = write_temp(dir.path(), "enc.zip", &bytes);
+    let out = dir.path().join("out");
+
+    let mut a = ZipArchive::open(&p).unwrap();
+    let entries = a.entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(
+        entries[0].encryption.is_encrypted(),
+        "the encryption bit must be surfaced in the index"
+    );
+
+    // Without a password the member must not be written.
+    let report = run_extract(&mut a, "*", &out, &ExtractionBudget::interactive()).unwrap();
+    assert_eq!(report.extracted, 0, "nothing may be written");
+    assert!(!out.join("secret.bin").exists());
+
+    // And the engine must say "password", not "damaged".
+    let err = a.read_entry("secret.bin", &mut NoPassword);
+    assert!(
+        matches!(err, Err(Error::PasswordRequired) | Err(Error::BadPassword)),
+        "got {err:?}"
+    );
+}
+
 // --- nested archives -------------------------------------------------------
 
 #[test]
@@ -799,10 +857,14 @@ fn nested_archive_is_opened_without_touching_the_outer_archive() {
     assert_eq!(found[0].raw_name, "nested.zip");
 
     let at = zipee_engine::nested::NestedPath::root();
-    let nested =
-        zipee_engine::nested::NestedArchive::open_member(&mut a, "nested.zip", &mut NoPassword, &at)
-            .unwrap()
-            .expect("nested.zip should open");
+    let nested = zipee_engine::nested::NestedArchive::open_member(
+        &mut a,
+        "nested.zip",
+        &mut NoPassword,
+        &at,
+    )
+    .unwrap()
+    .expect("nested.zip should open");
 
     let mut nested = nested;
     assert_eq!(nested.container(), Format::Zip);

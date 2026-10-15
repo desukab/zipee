@@ -80,10 +80,7 @@ impl SafeMemberPath {
 
     /// Parent path, empty for a top-level member.
     pub fn parent(&self) -> &str {
-        self.0
-            .parent()
-            .and_then(|p| p.to_str())
-            .unwrap_or_default()
+        self.0.parent().and_then(|p| p.to_str()).unwrap_or_default()
     }
 
     /// The path as a `/`-joined string, the form used as a map key.
@@ -274,9 +271,15 @@ impl ExtractionBudget {
 /// A budget axis that was exceeded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum BudgetExceeded {
-    EntryCount { limit: u64 },
-    TotalBytes { limit: u64 },
-    SingleEntryBytes { limit: u64 },
+    EntryCount {
+        limit: u64,
+    },
+    TotalBytes {
+        limit: u64,
+    },
+    SingleEntryBytes {
+        limit: u64,
+    },
     Ratio {
         uncompressed: u64,
         compressed: u64,

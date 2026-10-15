@@ -1,0 +1,140 @@
+name: macos
+
+# Builds the native macOS app and the installer package.
+#
+# Two rules govern this workflow:
+#
+# 1. It never runs for a pull request from a fork. A fork cannot read this
+#    repository's secrets, and a build that could publish a release must not be
+#    influenceable by an untrusted branch.
+# 2. Signing and notarization are conditional on secrets being present. When
+#    they are absent the job still produces a real, installable, explicitly
+#    unsigned package and records that fact in the manifest — it does not
+#    pretend the build was signed.
+#
+# macOS runners are not guaranteed to be free on private repositories, so this
+# workflow is manual by default (`workflow_dispatch`) plus scheduled, and will
+# not silently consume minutes on every push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: "Notarize the package (requires ZIPEE_NOTARY_PROFILE secret)"
+        type: boolean
+        default: false
+  schedule:
+    # Weekly, Monday 04:17 UTC — an off-peak minute, to avoid the top of the hour.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build app and package
+    # `pull_request` is absent on purpose; see the header note.
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Show the toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --show-sdk-path
+          cargo --version
+          rustc --version
+          # Recorded in the run log so a failure is diagnosable from the log
+          # alone, without reproducing it locally.
+          echo "runner: $RUNNER_OS $RUNNER_ARCH"
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: macos-${{ hashFiles('Cargo.lock') }}
+          restore-keys: macos-
+
+      # The build script runs the test suite itself before it packages
+      # anything, so a failing security test can never reach a package.
+      - name: Build app and package
+        id: build
+        env:
+          ZIPEE_SIGN_IDENTITY: ${{ secrets.ZIPEE_SIGN_IDENTITY }}
+          ZIPEE_NOTARY_PROFILE: ${{ secrets.ZIPEE_NOTARY_PROFILE }}
+          ZIPEE_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build-macos.sh
+
+      - name: Show the release manifest
+        run: cat dist/release-manifest.txt
+
+      - name: Confirm the artifact is a real installer
+        run: |
+          set -euo pipefail
+          pkg="$(ls dist/*.pkg)"
+          file "$pkg"
+          # A file that is not a XAR container is not an installer, whatever
+          # it is named.
+          xar -tf "$pkg"
+          pkgutil --check-signature "$pkg" || true
+
+      - name: Install the package on this runner and launch the app
+        run: |
+          set -euo pipefail
+          pkg="$(ls dist/*.pkg)"
+          # Installing and actually starting the app is the only way to know
+          # the bundle is not subtly broken.
+          sudo installer -pkg "$pkg" -target /
+          ls -d /Applications/Zipee.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/Zipee.app/Contents/Info.plist
+          codesign --verify --deep --strict /Applications/Zipee.app || \
+            echo "unsigned build: codesign verification expected to fail"
+
+      - name: Run the CLI that ships in the engine
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p zipee-cli
+          work="$(mktemp -d)"
+          mkdir -p "$work/src"
+          echo zipee > "$work/src/hello.txt"
+          ./target/release/zipee create "$work/t.zip" "$work/src"
+          ./target/release/zipee list "$work/t.zip" --tree
+          ./target/release/zipee verify "$work/t.zip"
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zipee-macOS-pkg
+          path: |
+            dist/*.pkg
+            dist/SHA256SUMS.txt
+            dist/release-manifest.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      # Publishing a release is a separate, explicit step. Nothing in this
+      # workflow creates a release on its own.
+      - name: Summarise
+        run: |
+          {
+            echo "### Zipee macOS build"
+            echo
+            echo '```'
+            cat dist/release-manifest.txt
+            echo '```'
+            echo
+            echo "Artifacts are attached to this run. No release was published."
+          } >> "$GITHUB_STEP_SUMMARY"

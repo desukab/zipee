@@ -9,9 +9,7 @@ use std::io::{BufWriter, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use crate::archive::ArchiveAccess;
-use crate::entry::{
-    ArchiveEntry, ArchiveStats, Compression, Encryption, PasswordSource,
-};
+use crate::entry::{ArchiveEntry, ArchiveStats, Compression, Encryption, PasswordSource};
 use crate::error::{Error, IoContext, Result};
 use crate::format::{detect_path, Format};
 use crate::security::{ExtractionBudget, SafeMemberPath};
@@ -24,11 +22,9 @@ impl<T: Read + Seek> ReadSeek for T {}
 
 /// An open ZIP archive.
 ///
-/// `Debug` is implemented by hand: the underlying reader is a trait object and
-/// the fingerprint is the interesting part.
-
 /// Holds the underlying file so member data can be read on demand rather than
 /// slurped into memory — this is what keeps opening a huge archive cheap.
+/// `Debug` is implemented by hand because the reader is a trait object.
 pub struct ZipArchive {
     reader: zip::ZipArchive<Box<dyn ReadSeek>>,
     path: PathBuf,
@@ -166,7 +162,7 @@ fn map_zip_error(e: zip::result::ZipError) -> Error {
 }
 
 /// Convert a `zip` entry into the engine's neutral model.
-fn entry_from_zip(zip: &zip::read::ZipFile<'_>) -> Result<ArchiveEntry> {
+fn entry_from_zip(zip: &zip::read::ZipFile<'_>, encrypted: bool) -> Result<ArchiveEntry> {
     let raw = zip.name().to_string();
 
     // Reject hostile names here rather than at extraction time, so the UI can
@@ -195,7 +191,11 @@ fn entry_from_zip(zip: &zip::read::ZipFile<'_>) -> Result<ArchiveEntry> {
         _ => Compression::Unsupported(99), // nameable catch-all; see comment above
     };
 
-    let encryption = detect_encryption(zip);
+    let encryption = if encrypted {
+        refine_encryption(zip)
+    } else {
+        Encryption::None
+    };
 
     Ok(ArchiveEntry {
         raw_name: raw,
@@ -224,8 +224,9 @@ impl ArchiveAccess for ZipArchive {
     fn entries(&mut self) -> Result<Vec<ArchiveEntry>> {
         let mut out = Vec::with_capacity(self.reader.len());
         for i in 0..self.reader.len() {
+            let encrypted = is_encrypted(&mut self.reader, i);
             let f = self.reader.by_index_raw(i).map_err(map_zip_error)?;
-            out.push(entry_from_zip(&f)?);
+            out.push(entry_from_zip(&f, encrypted)?);
         }
         Ok(out)
     }
@@ -238,24 +239,17 @@ impl ArchiveAccess for ZipArchive {
         Ok(Vfs::from_entries(&self.entries()?))
     }
 
-    fn read_entry(
-        &mut self,
-        name: &str,
-        passwords: &mut dyn PasswordSource,
-    ) -> Result<Vec<u8>> {
+    fn read_entry(&mut self, name: &str, passwords: &mut dyn PasswordSource) -> Result<Vec<u8>> {
         let index = self.index_of(name)?;
         // Ask the index what this member needs before touching its data.
         let meta = {
+            let encrypted = is_encrypted(&mut self.reader, index);
             let f = self.reader.by_index_raw(index).map_err(map_zip_error)?;
-            entry_from_zip(&f)?
+            entry_from_zip(&f, encrypted)?
         };
         if meta.encryption.is_encrypted() {
             let Some(secret) = passwords.password_for(&meta) else {
-                return Err(if meta.encryption == Encryption::None {
-                    Error::PasswordRequired
-                } else {
-                    Error::PasswordRequired
-                });
+                return Err(Error::PasswordRequired);
             };
             let bytes = secret.0.as_bytes().to_vec();
             drop(secret);
@@ -335,28 +329,39 @@ fn datetime_to_system_time(dt: zip::DateTime) -> Option<std::time::SystemTime> {
 /// Extra-field header ID for WinZip AES, per the PKWARE appnote.
 const AES_EXTRA_FIELD_ID: u16 = 0x9901;
 
-/// Work out whether a member is encrypted, and with what.
+/// Distinguish WinZip AES from traditional ZipCrypto.
 ///
-/// The `zip` crate tracks this internally but does not surface it, so this
-/// reads the two signals the format actually defines:
-///
-/// * general-purpose bit 0 in the central header, which we cannot see without
-///   re-parsing, and
-/// * the presence of the `0x9901` AES extra field, which we *can* see.
-fn detect_encryption(zip: &zip::read::ZipFile<'_>) -> Encryption {
-    // An AES extra field is the only way to tell AES from ZipCrypto without
-    // walking the raw central directory, so scan the member's extra bytes.
+/// Both set the general-purpose encryption bit. Telling them apart is optional
+/// but improves the error a user sees: AES is a real cipher, ZipCrypto is not,
+/// and telling someone to rotate a ZipCrypto password would be misleading.
+fn refine_encryption(zip: &zip::read::ZipFile<'_>) -> Encryption {
+    // The `0x9901` extra field is how a ZIP says "this member is AES". Its
+    // presence is the only portable way to tell the two apart without walking
+    // the raw central directory.
     if let Some(extra) = zip.extra_data() {
-        if extra.windows(2).any(|w| {
-            u16::from_le_bytes([w[0], w[1]]) == AES_EXTRA_FIELD_ID
-        }) {
+        if extra
+            .windows(2)
+            .any(|w| u16::from_le_bytes([w[0], w[1]]) == AES_EXTRA_FIELD_ID)
+        {
             return Encryption::WinZipAes;
         }
     }
-    // `by_index_raw` succeeds for encrypted members too, so fall back to
-    // probing: an encrypted member cannot be opened without a password, and
-    // the crate reports that distinctly.
-    Encryption::None
+    Encryption::ZipCrypto
+}
+
+/// Whether the container marks a member as encrypted.
+///
+/// The `zip` crate tracks the general-purpose bit internally and uses it to
+/// refuse a passwordless open, but does not expose it. Asking is cheap and
+/// exact: `by_index` returns `PASSWORD_REQUIRED` for an encrypted member and a
+/// live handle for one that is not, and the refusal happens before any
+/// decryption is attempted.
+fn is_encrypted(reader: &mut zip::ZipArchive<Box<dyn ReadSeek>>, index: usize) -> bool {
+    use zip::result::ZipError as Z;
+    matches!(
+        reader.by_index(index),
+        Err(Z::UnsupportedArchive(Z::PASSWORD_REQUIRED))
+    )
 }
 
 /// Read a member's bytes and verify its CRC.
@@ -441,7 +446,9 @@ pub struct VerifyReport {
 impl VerifyReport {
     /// True when every readable member passed and nothing is pending.
     pub fn is_healthy(&self) -> bool {
-        self.failed.is_empty() && self.encrypted_pending.is_empty() && self.unsafe_entries.is_empty()
+        self.failed.is_empty()
+            && self.encrypted_pending.is_empty()
+            && self.unsafe_entries.is_empty()
     }
 }
 
@@ -486,8 +493,7 @@ pub fn create_zip(
             zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         for (name, data) in members {
-            w.start_file(name.as_key(), opts)
-                .map_err(map_zip_error)?;
+            w.start_file(name.as_key(), opts).map_err(map_zip_error)?;
             w.write_all(data).ctx("writing archive entry")?;
         }
         w.finish().map_err(map_zip_error)?;
@@ -498,7 +504,10 @@ pub fn create_zip(
 
 /// A temporary path beside `path`, so the final rename stays on one filesystem.
 pub fn temp_sibling(path: &Path) -> PathBuf {
-    let mut name = path.file_name().map(|s| s.to_os_string()).unwrap_or_default();
+    let mut name = path
+        .file_name()
+        .map(|s| s.to_os_string())
+        .unwrap_or_default();
     name.push(format!(".zipee-{}.tmp", std::process::id()));
     path.with_file_name(name)
 }

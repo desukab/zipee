@@ -13,9 +13,7 @@ use std::sync::Arc;
 use crate::archive::ArchiveAccess;
 use crate::entry::{ArchiveEntry, PasswordSource};
 use crate::error::{Error, IoContext, Result};
-use crate::security::{
-    sanitize_member_path, BudgetExceeded, ExtractionBudget,
-};
+use crate::security::{sanitize_member_path, BudgetExceeded, ExtractionBudget};
 
 /// A cooperative cancellation flag.
 ///
@@ -261,7 +259,9 @@ pub fn extract(
                     });
                     report.failed += 1;
                 } else {
-                    report.outcomes.push(MemberOutcome::DirectoryCreated { path: p.as_key() });
+                    report
+                        .outcomes
+                        .push(MemberOutcome::DirectoryCreated { path: p.as_key() });
                     report.created.push(target);
                 }
             }
@@ -313,9 +313,7 @@ pub fn extract(
                 let _ = fs::create_dir_all(&target);
                 MemberOutcome::Skipped { path: key.clone() }
             }
-            crate::entry::EntryKind::Symlink => {
-                extract_symlink(entry, &destination, &target, &key)
-            }
+            crate::entry::EntryKind::Symlink => extract_symlink(entry, &destination, &target, &key),
             crate::entry::EntryKind::Special => MemberOutcome::Rejected {
                 path: key.clone(),
                 reason: "device and FIFO members are never materialised".into(),
@@ -325,7 +323,10 @@ pub fn extract(
                     Ok(n) => {
                         report.created.push(target);
                         report.bytes_written += n;
-                        MemberOutcome::Extracted { path: key.clone(), bytes: n }
+                        MemberOutcome::Extracted {
+                            path: key.clone(),
+                            bytes: n,
+                        }
                     }
                     Err(Error::Cancelled) => return Err(Error::Cancelled),
                     Err(e) => MemberOutcome::Failed {
@@ -406,8 +407,7 @@ fn read_and_write(
     let data = archive.read_entry(&entry.raw_name, passwords)?;
 
     if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)
-            .ctx(format!("creating directory {}", parent.display()))?;
+        fs::create_dir_all(parent).ctx(format!("creating directory {}", parent.display()))?;
     }
 
     // Write to a temporary sibling, then rename. A cancelled or failed write
@@ -487,8 +487,14 @@ mod tests {
 
     #[test]
     fn selection_parsing() {
-        assert_eq!(Selection::parse("a.txt").unwrap(), Selection::Entry("a.txt".into()));
-        assert_eq!(Selection::parse("dir/").unwrap(), Selection::Subtree("dir".into()));
+        assert_eq!(
+            Selection::parse("a.txt").unwrap(),
+            Selection::Entry("a.txt".into())
+        );
+        assert_eq!(
+            Selection::parse("dir/").unwrap(),
+            Selection::Subtree("dir".into())
+        );
         assert_eq!(Selection::parse("*").unwrap(), Selection::Everything);
         assert_eq!(Selection::parse("").unwrap(), Selection::Everything);
         // hostile input is rejected at parse time
@@ -509,7 +515,10 @@ mod tests {
     #[test]
     fn report_classification() {
         let mut r = ExtractReport::default();
-        r.outcomes.push(MemberOutcome::Rejected { path: "x".into(), reason: "y".into() });
+        r.outcomes.push(MemberOutcome::Rejected {
+            path: "x".into(),
+            reason: "y".into(),
+        });
         r.rejected = 1;
         assert!(!r.is_clean());
         assert_eq!(r.rejections().len(), 1);
