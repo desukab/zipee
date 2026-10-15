@@ -114,6 +114,9 @@ done
 [[ ${#SLICES[@]} -ge 1 ]] || die "no archive core was built"
 
 LIB="$BUILD_DIR/libzipee_engine.a"
+# `lipo` writes a temporary next to its output and fails if the directory is
+# absent, so create it rather than relying on the app-bundle step later.
+mkdir -p "$BUILD_DIR"
 rm -f "$LIB"
 lipo -create "${SLICES[@]}" -output "$LIB"
 log "archive core: $(lipo -archs "$LIB")"
