@@ -225,6 +225,23 @@ fi
 
 if [[ "$SKIP_TESTS" -eq 0 ]]; then
   log "Running the Swift test suite"
+  # When the test suite fails to compile, the log says "cannot find X in
+  # scope" and not which XCTest is actually on the search path. This lists the
+  # symbols the module really exposes, so the next fix is informed rather than
+  # another guess.
+  dump_xctest_symbols() {
+    warn "XCTest symbols visible in $XCTEST_MODULE_DIR:"
+    local found=0
+    for sym in XCTMain testCase XCTestCaseEntry XCTestSuite XCTestCase XCTAssertEqual; do
+      if strings "$XCTEST_MODULE_DIR/XCTest.swiftmodule"/* 2>/dev/null | grep -qx "$sym" \
+         || strings "$XCTEST_FRAMEWORKS/XCTest.framework/XCTest" 2>/dev/null | grep -qx "$sym"; then
+        log "    present: $sym"; found=1
+      else
+        log "    MISSING: $sym"
+      fi
+    done
+    [[ "$found" -eq 1 ]] || warn "    (could not read the module at all)"
+  }
   # XCTest is split: the Objective-C framework is under Developer/Library/
   # Frameworks, but XCTAssertEqual and friends are a *Swift overlay* whose
   # swiftmodule lives under Developer/usr/lib. Passing only -F finds the
@@ -270,7 +287,7 @@ if [[ "$SKIP_TESTS" -eq 0 ]]; then
       -warnings-as-errors \
       -o "$TEST_BIN-$arch" \
       "${LIB_SOURCES[@]}" "${TEST_SOURCES[@]}" \
-      || die "swiftc failed building the test suite for $arch"
+      || { dump_xctest_symbols; die "swiftc failed building the test suite for $arch"; }
 
     log "  running Swift tests ($arch)"
     "$TEST_BIN-$arch" || die "Swift tests failed on $arch"
