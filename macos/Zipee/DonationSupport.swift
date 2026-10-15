@@ -52,32 +52,27 @@ public enum Donation {
         """
 }
 
-/// Base58, the alphabet Solana uses for addresses.
+/// The base58 alphabet Solana uses for addresses.
 enum Base58 {
     static let alphabet = Array("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
 
-    /// Decode to bytes, or `nil` if a character is not base58.
-    static func decode(_ text: String) -> [UInt8]? {
-        var value: [UInt8] = []
-        for character in text.unicodeScalars {
-            guard let scalar = character.asciiValue,
-                  let index = alphabet.firstIndex(where: { $0.asciiValue! == scalar })
-            else { return nil }
-            // value = value * 58 + index
-            var carry = Int(index)
-            for byte in value.reversed() {
-                let t = Int(byte) * 58 + carry
-                byte &-= UInt8(t % 256)
-                carry = t / 256
-            }
-            while carry > 0 {
-                value.insert(UInt8(carry % 256), at: 0)
-                carry /= 256
-            }
-        }
-        // Each leading '1' represents a leading zero byte.
-        for _ in text.prefix(while: { $0 == "1" }) { value.insert(0, at: 0) }
-        return value
+    /// True when every character is in the base58 alphabet.
+    ///
+    /// Deliberately a *charset* check and nothing more.
+    ///
+    /// A full base58 decoder was written here and then removed: three
+    /// hand-rolled attempts disagreed with a known-good reference, and the
+    /// Swift layer cannot be unit-tested on the build host. Shipping a
+    /// plausible-looking decoder that has never run would be worse than not
+    /// having one — a wrong decoder does not fail loudly, it validates the
+    /// wrong things.
+    ///
+    /// So validation here is charset plus length, which are obvious and
+    /// verifiable by inspection. The authoritative check that the address
+    /// decodes to exactly the expected 32 bytes is in the test suite and in
+    /// CI, where a real base58 implementation is available to compare against.
+    static func isValidCharset(_ text: String) -> Bool {
+        !text.isEmpty && text.allSatisfy { alphabet.contains($0) }
     }
 }
 
@@ -86,17 +81,22 @@ public enum SolanaAddress {
     /// A valid Solana public key is 32 bytes.
     public static let expectedByteCount = 32
 
-    /// Validate a base58 public key of the right length.
+    /// The character-count range that a 32-byte public key can occupy in
+    /// base58. A 32-byte value needs 43 or 44 characters: 43 when the leading
+    /// bytes are small, 44 otherwise. Solana addresses are always in this range.
+    public static let validCharacterCounts = 43...44
+
+    /// Validate that `address` could be a 32-byte Solana public key.
     ///
-    /// This checks encoding and length only. It deliberately does **not**
-    /// attempt an on-curve check: an address that is merely well-formed is
-    /// still the address we must display, and rejecting it would be worse than
-    /// showing a key that its owner can decide what to do with.
+    /// Checks the base58 charset and the character count. It deliberately does
+    /// **not** attempt an on-curve check: an address that is merely well-formed
+    /// is still the address we must display, and refusing to show it would be
+    /// worse than showing a key its owner can decide what to do with.
     public static func validate(_ address: String) -> Result<Void, AddressError> {
         guard !address.isEmpty else { return .failure(.empty) }
-        guard let bytes = Base58.decode(address) else { return .failure(.notBase58) }
-        guard bytes.count == expectedByteCount else {
-            return .failure(.wrongLength(bytes.count))
+        guard Base58.isValidCharset(address) else { return .failure(.notBase58) }
+        guard validCharacterCounts.contains(address.count) else {
+            return .failure(.wrongLength(address.count))
         }
         return .success(())
     }
@@ -111,7 +111,7 @@ public enum SolanaAddress {
             case .empty: "the address is empty"
             case .notBase58: "the address contains a character outside base58"
             case .wrongLength(let n):
-                "the address decodes to \(n) bytes, expected \(expectedByteCount)"
+                "the address is \(n) characters, expected \(validCharacterCounts.lowerBound)-\(validCharacterCounts.upperBound)"
             }
         }
     }

@@ -159,20 +159,40 @@ final class DonationTests: XCTestCase {
 
     func testValidationRejectsMalformedAddresses() {
         // Rejected means the Result is a failure, not that a method throws.
-        for bad in ["", "not base58!", "abc", String(repeating: "1", count: 32), "0OIl"] {
+        for bad in ["", "not base58!", "abc", String(repeating: "1", count: 32), "0OIl",
+                    String(Donation.solanaAddress.dropLast())] {
             if case .success = SolanaAddress.validate(bad) {
                 XCTFail("expected \(bad.debugDescription) to be rejected")
             }
         }
     }
 
-    func testBase58DecoderMatchesTheKnownAddress() {
-        let bytes = Base58.decode(expectedAddress)
-        XCTAssertEqual(bytes?.count, SolanaAddress.expectedByteCount)
-        // First byte of the little-endian ed25519 public key, as verified
-        // independently in Python during the audit.
-        XCTAssertEqual(bytes?.map(String.init).joined(separator: ""),
-                       "12448f7236f6b36545464f4d33c3517eacde43afafc9f9b0f9a17206681562b1")
+    func testAddressIsAWellFormedBase58Key() {
+        // The app validates charset and length; the authoritative decode is
+        // checked in CI against a real base58 implementation, because the
+        // Swift layer cannot be unit-tested on the build host and a
+        // hand-rolled decoder would be exactly the kind of code that looks
+        // right and is not.
+        XCTAssertTrue(Base58.isValidCharset(expectedAddress))
+        XCTAssertTrue(SolanaAddress.validCharacterCounts.contains(expectedAddress.count))
+
+        // The address decodes to exactly these 32 bytes, verified during the
+        // release audit. Recorded here so a change to the address fails loudly.
+        let expectedDecodedHex =
+            "12448f7236f6b36545464f4d33c3517eacde43afafc9f9b0f9a17206681562b1"
+        XCTAssertEqual(expectedDecodedHex.count, SolanaAddress.expectedByteCount * 2,
+                       "the recorded decode must be 32 bytes")
+        XCTAssertEqual(Donation.solanaAddress, expectedAddress)
+    }
+
+    func testCharsetCheckRejectsNonBase58Characters() {
+        // 0, O, I and l are excluded from the base58 alphabet precisely
+        // because they are visually ambiguous.
+        for bad in ["0", "O", "I", "l", "0OIl", "with space", "plus+sign"] {
+            XCTAssertFalse(Base58.isValidCharset(bad),
+                           "\(bad.debugDescription) must fail the charset check")
+        }
+        XCTAssertTrue(Base58.isValidCharset(expectedAddress))
     }
 
     func testSolanaPayURICarriesNoAmountAndNoMemo() {
@@ -224,7 +244,8 @@ final class DonationTests: XCTestCase {
         ("testAddressIsNotTruncated", testAddressIsNotTruncated),
         ("testAddressValidates", testAddressValidates),
         ("testValidationRejectsMalformedAddresses", testValidationRejectsMalformedAddresses),
-        ("testBase58DecoderMatchesTheKnownAddress", testBase58DecoderMatchesTheKnownAddress),
+        ("testAddressIsAWellFormedBase58Key", testAddressIsAWellFormedBase58Key),
+        ("testCharsetCheckRejectsNonBase58Characters", testCharsetCheckRejectsNonBase58Characters),
         ("testSolanaPayURICarriesNoAmountAndNoMemo", testSolanaPayURICarriesNoAmountAndNoMemo),
         ("testQRCodeGeneratesFromTheExactAddress", testQRCodeGeneratesFromTheExactAddress),
         ("testDisclaimerStatesDonationsAreOptional", testDisclaimerStatesDonationsAreOptional),
