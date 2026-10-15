@@ -9,114 +9,117 @@
 
 import Foundation
 import XCTest
-@testable import Foundation
 
 // MARK: - ArchiveSession
 
-@MainActor
 final class SessionTests: XCTestCase {
-    func testSessionOpensAndIndexes() async throws {
+    /// Wait for the session's background indexing to land.
+    ///
+    /// ArchiveSession is `@MainActor` and indexes off-thread, so the tests are
+    /// synchronous and wait on an expectation. An `async` test method cannot be
+    /// registered with `XCTMain`, which only accepts synchronous closures.
+    private func waitForIndexed(_ session: ArchiveSession, timeout: TimeInterval = 20) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if MainActor.assumeIsolated({ session.isBusy }) { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+    }
+
+    func testSessionOpensAndIndexes() throws {
         let fixture = try ArchiveFixture(members: [
             ("a.txt", Data("alpha".utf8)),
             ("dir/b.txt", Data("beta".utf8)),
         ])
         defer { fixture.cleanUp() }
 
-        let session = ArchiveSession()
-        session.open(fixture.archiveURL)
+        let session = MainActor.assumeIsolated { ArchiveSession() }
+        MainActor.assumeIsolated { session.open(fixture.archiveURL) }
+        waitForIndexed(session)
 
-        // The index is built on a background task, so wait for it rather than
-        // assuming it has landed.
-        let deadline = Date().addingTimeInterval(20)
-        while session.entries.isEmpty && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-
-        XCTAssertEqual(session.entries.count, 2)
-        XCTAssertNotNil(session.stats)
-        XCTAssertFalse(session.isBusy)
-        XCTAssertNil(session.errorMessage, "an ordinary archive must not report an error")
+        XCTAssertEqual(MainActor.assumeIsolated { session.entries.count }, 2)
+        XCTAssertNotNil(MainActor.assumeIsolated { session.stats })
+        XCTAssertFalse(MainActor.assumeIsolated { session.isBusy })
+        XCTAssertNil(
+            MainActor.assumeIsolated { session.errorMessage },
+            "an ordinary archive must not report an error")
     }
 
-    func testNavigationMovesBetweenFoldersAndBack() async throws {
+    func testNavigationMovesBetweenFoldersAndBack() throws {
         let fixture = try ArchiveFixture(members: [("dir/b.txt", Data("beta".utf8))])
         defer { fixture.cleanUp() }
 
-        let session = ArchiveSession()
-        session.open(fixture.archiveURL)
-        let deadline = Date().addingTimeInterval(20)
-        while session.entries.isEmpty && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
+        let session = MainActor.assumeIsolated { ArchiveSession() }
+        MainActor.assumeIsolated { session.open(fixture.archiveURL) }
+        waitForIndexed(session)
 
-        XCTAssertEqual(session.location.path, "")
-        let items = session.visibleItems
+        XCTAssertEqual(MainActor.assumeIsolated { session.location.path }, "")
+        let items = MainActor.assumeIsolated { session.visibleItems }
         XCTAssertEqual(items.first?.name, "dir")
         XCTAssertEqual(items.first?.isDirectory, true)
 
-        session.navigate(to: .folder("dir"))
-        XCTAssertEqual(session.location.path, "dir")
-        XCTAssertEqual(session.visibleItems.first?.name, "b.txt")
+        MainActor.assumeIsolated { session.navigate(to: .folder("dir")) }
+        XCTAssertEqual(MainActor.assumeIsolated { session.location.path }, "dir")
+        XCTAssertEqual(
+            MainActor.assumeIsolated { session.visibleItems.first?.name }, "b.txt")
 
-        session.goUp()
-        XCTAssertEqual(session.location.path, "")
+        MainActor.assumeIsolated { session.goUp() }
+        XCTAssertEqual(MainActor.assumeIsolated { session.location.path }, "")
         // Going up from the root must be a no-op, not an error.
-        session.goUp()
-        XCTAssertEqual(session.location.path, "")
+        MainActor.assumeIsolated { session.goUp() }
+        XCTAssertEqual(MainActor.assumeIsolated { session.location.path }, "")
     }
 
-    func testSearchNarrowsTheListing() async throws {
+    func testSearchNarrowsTheListing() throws {
         let fixture = try ArchiveFixture(members: [
             ("needle.txt", Data("x".utf8)),
             ("other.txt", Data("y".utf8)),
         ])
         defer { fixture.cleanUp() }
 
-        let session = ArchiveSession()
-        session.open(fixture.archiveURL)
-        let deadline = Date().addingTimeInterval(20)
-        while session.entries.isEmpty && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
+        let session = MainActor.assumeIsolated { ArchiveSession() }
+        MainActor.assumeIsolated { session.open(fixture.archiveURL) }
+        waitForIndexed(session)
 
-        session.search("needle")
-        XCTAssertEqual(session.visibleItems.count, 1)
-        XCTAssertEqual(session.visibleItems.first?.name, "needle.txt")
+        MainActor.assumeIsolated { session.search("needle") }
+        XCTAssertEqual(MainActor.assumeIsolated { session.visibleItems.count }, 1)
+        XCTAssertEqual(
+            MainActor.assumeIsolated { session.visibleItems.first?.name }, "needle.txt")
 
-        session.search("")
-        XCTAssertEqual(session.visibleItems.count, 2)
+        MainActor.assumeIsolated { session.search("") }
+        XCTAssertEqual(MainActor.assumeIsolated { session.visibleItems.count }, 2)
     }
 
-    func testOpeningSomethingUnreadableReportsAnErrorRatherThanCrashing() async throws {
-        let session = ArchiveSession()
-        session.open(URL(fileURLWithPath: "/nonexistent/nope.zip"))
+    func testOpeningSomethingUnreadableReportsAnErrorRatherThanCrashing() {
+        let session = MainActor.assumeIsolated { ArchiveSession() }
+        MainActor.assumeIsolated { session.open(URL(fileURLWithPath: "/nonexistent/nope.zip")) }
 
         let deadline = Date().addingTimeInterval(20)
-        while session.errorMessage == nil && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
+        while Date() < deadline {
+            if MainActor.assumeIsolated({ session.errorMessage }) != nil { break }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
-        XCTAssertNotNil(session.errorMessage, "a failed open must be reported")
-        XCTAssertNil(session.archive)
-        XCTAssertFalse(session.isBusy)
+        XCTAssertNotNil(
+            MainActor.assumeIsolated { session.errorMessage },
+            "a failed open must be reported")
+        XCTAssertNil(MainActor.assumeIsolated { session.archive })
+        XCTAssertFalse(MainActor.assumeIsolated { session.isBusy })
     }
 
-    func testCloseResetsEverything() async throws {
+    func testCloseResetsEverything() throws {
         let fixture = try ArchiveFixture(members: [("a.txt", Data("x".utf8))])
         defer { fixture.cleanUp() }
 
-        let session = ArchiveSession()
-        session.open(fixture.archiveURL)
-        let deadline = Date().addingTimeInterval(20)
-        while session.entries.isEmpty && Date() < deadline {
-            try await Task.sleep(nanoseconds: 50_000_000)
-        }
-        XCTAssertNotNil(session.archive)
+        let session = MainActor.assumeIsolated { ArchiveSession() }
+        MainActor.assumeIsolated { session.open(fixture.archiveURL) }
+        waitForIndexed(session)
+        XCTAssertNotNil(MainActor.assumeIsolated { session.archive })
 
-        session.close()
-        XCTAssertNil(session.archive)
-        XCTAssertTrue(session.entries.isEmpty)
-        XCTAssertNil(session.stats)
-        XCTAssertEqual(session.location.path, "")
+        MainActor.assumeIsolated { session.close() }
+        XCTAssertNil(MainActor.assumeIsolated { session.archive })
+        XCTAssertTrue(MainActor.assumeIsolated { session.entries.isEmpty })
+        XCTAssertNil(MainActor.assumeIsolated { session.stats })
+        XCTAssertEqual(MainActor.assumeIsolated { session.location.path }, "")
     }
 
     static var allTests = [
@@ -155,13 +158,11 @@ final class DonationTests: XCTestCase {
     }
 
     func testValidationRejectsMalformedAddresses() {
+        // Rejected means the Result is a failure, not that a method throws.
         for bad in ["", "not base58!", "abc", String(repeating: "1", count: 32), "0OIl"] {
-            XCTAssertThrowsError(
-                try { () throws -> Void in
-                    if case .failure = SolanaAddress.validate(bad) { return }
-                    XCTFail("expected \(bad.debugDescription) to be rejected")
-                }(),
-                "expected \(bad.debugDescription) to be rejected")
+            if case .success = SolanaAddress.validate(bad) {
+                XCTFail("expected \(bad.debugDescription) to be rejected")
+            }
         }
     }
 

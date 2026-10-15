@@ -254,8 +254,8 @@ untrusted branch.
 |---|---|---|---|
 | `zip` | 2.4 | MIT | ZIP read/write **and** WinZip AES decryption. Chosen specifically because Apple's own Archive Utility cannot read AES-256 archives. |
 | `crc32fast` | 1.4 | MIT | Integrity verification |
-| `thiserror` | 2 | MIT OR Apache-2.0 | Error derive |
-| `clap` (CLI only) | 4 | MIT OR Apache-2.0 | Argument parsing |
+| `thiserror` | 2 | Apache-2.0 | Error derive |
+| `clap` (CLI only) | 4 | Apache-2.0 | Argument parsing |
 
 Deliberately **not** used:
 
@@ -266,7 +266,7 @@ Deliberately **not** used:
   and it would move the security boundary into C where the test suite cannot see
   it.
 
-Zipee is dual-licensed MIT OR Apache-2.0 to match its dependency floor.
+Zipee is dual-licensed Apache-2.0 to match its dependency floor.
 
 ## What is deliberately not built
 

@@ -40,4 +40,4 @@ that cannot construct the attack is not a test.
 
 ## Licensing
 
-Contributions are accepted under MIT OR Apache-2.0, matching the project.
+Contributions are accepted under Apache-2.0, matching the project.

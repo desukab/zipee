@@ -40,45 +40,76 @@ final class ArchiveFixture {
     /// `Archive` is not available headlessly, and shelling out would make these
     /// tests depend on an external tool. The records below are a complete,
     /// spec-valid, stored-method ZIP.
+    /// Write a ZIP by hand.
+    ///
+    /// `Archive` is not usable headlessly and shelling out would make these
+    /// tests depend on an external tool, so the records are emitted directly:
+    /// a local file header and body per member, then the central directory,
+    /// then the end-of-central-directory record.
     private static func write(members: [(String, Data)], to url: URL) throws {
-        var bytes = Data()
-        var central = Data()
+        var body = Data()
+        var directory = Data()
         var count: UInt16 = 0
 
-        func append32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { bytes.append(contentsOf: $0) } }
-        func append16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { bytes.append(contentsOf: $0) } }
+        // Two appenders, one per stream. A single helper writing to `body`
+        // would corrupt the central directory, which is exactly the bug this
+        // rewrite fixes.
+        func u16(_ v: UInt16, into out: inout Data) {
+            withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
+        }
+        func u32(_ v: UInt32, into out: inout Data) {
+            withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
+        }
 
-        for (name, body) in members {
+        for (name, content) in members {
             let nameBytes = Array(name.utf8)
-            let offset = UInt32(bytes.count)
-            let crc = CRC32.checksum(body)
+            let localOffset = UInt32(body.count)
+            let crc = CRC32.checksum(content)
+            let size = UInt32(content.count)
 
-            bytes.append(contentsOf: [0x50, 0x4B, 0x03, 0x04])
-            append16(20); append16(0); append16(0); append16(0); append16(0x21)
-            append32(crc); append32(UInt32(body.count)); append32(UInt32(body.count))
-            append16(UInt16(nameBytes.count)); append16(0)
-            bytes.append(contentsOf: nameBytes)
-            bytes.append(body)
+            // Local file header: stored, no flags, fixed DOS date.
+            body.append(contentsOf: [0x50, 0x4B, 0x03, 0x04])
+            u16(20, into: &body); u16(0, into: &body)
+            u16(0, into: &body); u16(0, into: &body); u16(0x21, into: &body)
+            u32(crc, into: &body); u32(size, into: &body); u32(size, into: &body)
+            u16(UInt16(nameBytes.count), into: &body); u16(0, into: &body)
+            body.append(contentsOf: nameBytes)
+            body.append(content)
 
-            let cOffset = UInt32(central.count)
-            central.append(contentsOf: [0x50, 0x4B, 0x01, 0x02])
-            append16(0x031E); append16(20); append16(0); append16(0)
-            append16(0); append16(0x21)
-            append32(crc); append32(UInt32(body.count)); append32(UInt32(body.count))
-            append16(UInt16(nameBytes.count)); append16(0); append16(0)
-            append16(0); append16(0); append32(0o100644 << 16); append32(offset)
-            central.append(contentsOf: nameBytes)
-            _ = cOffset
+            // Central directory record for the same member.
+            directory.append(contentsOf: [0x50, 0x4B, 0x01, 0x02])
+            u16(0x031E, into: &directory)   // version made by: unix, 3.0
+            u16(20, into: &directory)      // version needed
+            u16(0, into: &directory)       // flags
+            u16(0, into: &directory)       // method: stored
+            u16(0, into: &directory)       // mod time
+            u16(0x21, into: &directory)    // mod date
+            u32(crc, into: &directory)
+            u32(size, into: &directory)    // compressed
+            u32(size, into: &directory)    // uncompressed
+            u16(UInt16(nameBytes.count), into: &directory)
+            u16(0, into: &directory)       // extra length
+            u16(0, into: &directory)       // comment length
+            u16(0, into: &directory)       // disk number start
+            u16(0, into: &directory)       // internal attributes
+            u32(0o100644 << 16, into: &directory)  // external attributes: unix 0644
+            u32(localOffset, into: &directory)
+            directory.append(contentsOf: nameBytes)
+
             count += 1
         }
 
-        let cdOffset = UInt32(bytes.count)
-        bytes.append(central)
-        bytes.append(contentsOf: [0x50, 0x4B, 0x05, 0x06])
-        append16(0); append16(0); append16(count); append16(count)
-        append32(UInt32(central.count)); append32(cdOffset); append16(0)
+        let directoryOffset = UInt32(body.count)
+        let directorySize = UInt32(directory.count)
+        body.append(directory)
 
-        try bytes.write(to: url)
+        body.append(contentsOf: [0x50, 0x4B, 0x05, 0x06])
+        u16(0, into: &body); u16(0, into: &body)
+        u16(count, into: &body); u16(count, into: &body)
+        u32(directorySize, into: &body); u32(directoryOffset, into: &body)
+        u16(0, into: &body)
+
+        try body.write(to: url)
     }
 
     func cleanUp() { try? FileManager.default.removeItem(at: directory) }
