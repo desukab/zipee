@@ -1,21 +1,16 @@
 ---
-# Cut a Zipee release by pushing a tag.
+# Cut a Zipee release by pushing a version tag.
 #
-# The .pkg is not built here. It is built and verified by macos.yml, which
-# uploads it as the `Zipee-macOS-pkg` artifact. This workflow waits for that
-# build to finish on the tagged commit, downloads the artifact it produced,
-# and attaches it to the GitHub release. Building it in this workflow instead
-# would mean two build paths that can drift apart.
-#
-# Why not just build on tag: the macOS job is the only one that can produce a
-# universal Mach-O, and it is the only one that can actually install the
-# package to verify it. Reusing it keeps a single source of truth for the
-# artifact and its SHA-256.
+# The .pkg is not built here. It is built, installed and checksummed by
+# macos.yml, which uploads it as a per-runner artifact. This workflow waits for
+# that build to finish on the tagged commit, downloads the artifact it
+# produced, and attaches it to the GitHub release. Building here instead would
+# create a second build path that can drift from the one people verify.
 #
 # Usage:
 #   git tag v0.2.0 && git push origin v0.2.0
 #
-# Or dispatch manually with an explicit tag.
+# Or dispatch manually with an explicit existing tag.
 
 name: Release
 
@@ -32,9 +27,8 @@ on:
 permissions:
   # Create/update the release and upload its assets.
   contents: write
-  # Required to download the Zipee-macOS-pkg artifact produced by macos.yml.
-  # Without this the download step fails with 403 even though the release
-  # itself would be permitted.
+  # Required to download the artifacts produced by macos.yml. Without this the
+  # download step fails with 403 even though the release itself is permitted.
   actions: read
 
 concurrency:
@@ -58,12 +52,18 @@ jobs:
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Verify tag exists on the remote
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch --tags --force --quiet
-          if ! git rev-parse -q --verify "refs/tags/${{ steps.tag.outputs.value }}" >/dev/null; then
-            echo "::error::tag ${{ steps.tag.outputs.value }} does not exist"
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.value }}"
+          # API rather than git: this job deliberately does not check out the
+          # repository, so there is no local .git for `git rev-parse` to read.
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG does not exist on the remote"
             exit 1
           fi
+          echo "tag $TAG confirmed"
 
       - name: Wait for the macOS build of this exact commit
         uses: actions/github-script@v7
@@ -71,53 +71,64 @@ jobs:
         with:
           result-encoding: string
           script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
             const tag = '${{ steps.tag.outputs.value }}';
-            const sha = (await github.rest.git.getRef({
-              ref: `tags/${tag}`
-            })).object.sha;
-            const commit = (await github.rest.git.getTag({
-              tag_name: tag
-            })).object?.sha || sha;
 
-            // Poll for the macos workflow to finish on the tagged commit.
+            // Resolve tag -> commit. An annotated tag's ref points at a tag
+            // object; a lightweight tag's ref points straight at the commit.
+            // github-script wraps every response in .data.
+            const ref = (await github.rest.git.getRef({
+              owner, repo, ref: `tags/${tag}`
+            })).data.object;
+
+            let commit = ref.sha;
+            if (ref.type === 'tag') {
+              commit = (await github.rest.git.getTag({
+                owner, repo, tag_sha: ref.sha
+              })).data.object.sha;
+            }
+            core.info(`tag ${tag} resolves to commit ${commit}`);
+
+            // Poll for macos.yml to finish on that commit. Both workflows are
+            // triggered by the same tag push, so the build may not have
+            // registered yet on the first pass.
             for (let i = 0; i < 30; i++) {
-              const runs = await github.rest.actions.listWorkflowRunsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'macos.yml',
-                head_sha: commit,
-                per_page: 20
-              });
-              const done = runs.workflow_runs.find(
-                r => r.conclusion && r.status === 'completed'
-              );
+              const runs = (await github.rest.actions.listWorkflowRunsForRepo({
+                owner, repo, workflow_id: 'macos.yml',
+                head_sha: commit, per_page: 20
+              })).data.workflow_runs;
+
+              const done = runs.find(r => r.status === 'completed');
               if (done) {
                 if (done.conclusion !== 'success') {
                   core.setFailed(
-                    `macos.yml concluded ${done.conclusion} on the tagged commit`
+                    `macos.yml concluded '${done.conclusion}' on ${commit}; ` +
+                    `refusing to publish an unverified package`
                   );
                   return;
                 }
+                core.info(`using macos.yml run ${done.id}`);
                 return done.id;
               }
               await new Promise(r => setTimeout(r, 20000));
             }
             core.setFailed('macos.yml did not complete on the tagged commit');
 
-      - name: Download the verified package
+      - name: Download the preferred (macos-15) package
+        id: dl15
+        # continue-on-error so a missing macos-15 artifact falls through to the
+        # fallback instead of aborting the job and skipping every later step.
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          # The build is a two-runner matrix (macos-15, macos-14) with unique
-          # artifact names per leg. macos-15 is preferred: newer SDK. The
-          # fallback to macos-14 exists because FSKit needs macOS 15.4+ and
-          # the older image is the documented fallback.
           name: Zipee-macOS-pkg-macos-15
           path: dist
           run-id: ${{ steps.find_run.outputs.result }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Fall back to the macos-14 build if macos-15 is absent
-        if: failure()
+      - name: Download the fallback (macos-14) package
+        if: steps.dl15.outcome == 'failure'
         uses: actions/download-artifact@v4
         with:
           name: Zipee-macOS-pkg-macos-14
@@ -125,14 +136,29 @@ jobs:
           run-id: ${{ steps.find_run.outputs.result }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Ensure exactly one package was downloaded
+        run: |
+          set -euo pipefail
+          ls -l dist/
+          count="$(ls dist/*.pkg 2>/dev/null | wc -l)"
+          if [ "$count" -ne 1 ]; then
+            echo "::error::expected exactly one .pkg, found $count"
+            exit 1
+          fi
+
       - name: Confirm the artifact is a real installer
         run: |
           set -euo pipefail
           pkg="$(ls dist/*.pkg)"
-          file "$pkg"
-          # A file that is not a XAR container is not an installer, whatever
-          # it happens to be named.
-          xar -tf "$pkg" >/dev/null
+          # A macOS .pkg is a XAR container: its first four bytes are "xar!".
+          # Checked by magic bytes rather than with `xar`, which is a macOS
+          # tool and this job runs on ubuntu-latest.
+          magic="$(head -c 4 "$pkg")"
+          if [ "$magic" != "xar!" ]; then
+            echo "::error::$pkg is not a XAR package (first bytes: '$magic')"
+            exit 1
+          fi
+          echo "$pkg is a XAR package"
 
       - name: Fail if the checksum in SHA256SUMS.txt does not match
         working-directory: dist
@@ -147,8 +173,7 @@ jobs:
           fi
           echo "checksum verified: $actual"
 
-      - name: Build release body from the manifest
-        id: body
+      - name: Build the release body from the manifest
         working-directory: dist
         run: |
           set -euo pipefail
@@ -171,7 +196,8 @@ jobs:
             echo
             echo '## Verify'
             echo
-            echo 'Because this is unsigned, the checksum is the only integrity check available:'
+            echo 'Because this build is unsigned, the checksum is the only integrity'
+            echo 'check available:'
             echo
             echo '```'
             cat SHA256SUMS.txt
@@ -192,10 +218,6 @@ jobs:
             echo
             echo 'Full ledger: [`docs/release-status.md`](https://github.com/desukab/zipee/blob/main/docs/release-status.md)'
           } > release-body.md
-          {
-            echo '::add-mask::*(.pkg)'
-            echo '::add-mask::*(SHA256SUMS.txt)'
-          } >> "$GITHUB_OUTPUT"
 
       - name: Publish the release
         env:
@@ -205,7 +227,8 @@ jobs:
           TAG="${{ steps.tag.outputs.value }}"
           VERSION="${TAG#v}"
 
-          # Re-release is a no-op rather than a failure if the tag exists.
+          # Re-publishing an existing tag updates assets rather than failing,
+          # so a re-run after a fixed build is a no-op.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists — updating assets"
             gh release upload "$TAG" dist/*.pkg dist/SHA256SUMS.txt dist/release-manifest.txt --clobber
@@ -214,7 +237,6 @@ jobs:
             gh release create "$TAG" \
               --title "Zipee $VERSION" \
               --notes-file dist/release-body.md \
-              --target "$TAG" \
               dist/*.pkg dist/SHA256SUMS.txt dist/release-manifest.txt
           fi
 
@@ -223,8 +245,8 @@ jobs:
           {
             echo "### Released ${{ steps.tag.outputs.value }}"
             echo
-            echo "A build from run ${{ steps.find_run.outputs.result }} passed the"
-            echo "macOS build, package, install, bundle-format and checksum gates."
+            echo "Build run ${{ steps.find_run.outputs.result }} passed the macOS"
+            echo "build, package, install, bundle-format and checksum gates."
             echo
             echo "[View release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.value }})"
           } >> "$GITHUB_STEP_SUMMARY"
