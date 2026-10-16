@@ -1,0 +1,212 @@
+---
+# Cut a Zipee release by pushing a tag.
+#
+# The .pkg is not built here. It is built and verified by macos.yml, which
+# uploads it as the `Zipee-macOS-pkg` artifact. This workflow waits for that
+# build to finish on the tagged commit, downloads the artifact it produced,
+# and attaches it to the GitHub release. Building it in this workflow instead
+# would mean two build paths that can drift apart.
+#
+# Why not just build on tag: the macOS job is the only one that can produce a
+# universal Mach-O, and it is the only one that can actually install the
+# package to verify it. Reusing it keeps a single source of truth for the
+# artifact and its SHA-256.
+#
+# Usage:
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Or dispatch manually with an explicit tag.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (e.g. v0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "no tag resolved" >&2
+            exit 1
+          fi
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag exists on the remote
+        run: |
+          git fetch --tags --force --quiet
+          if ! git rev-parse -q --verify "refs/tags/${{ steps.tag.outputs.value }}" >/dev/null; then
+            echo "::error::tag ${{ steps.tag.outputs.value }} does not exist"
+            exit 1
+          fi
+
+      - name: Wait for the macOS build of this exact commit
+        uses: actions/github-script@v7
+        id: find_run
+        with:
+          result-encoding: string
+          script: |
+            const tag = '${{ steps.tag.outputs.value }}';
+            const sha = (await github.rest.git.getRef({
+              ref: `tags/${tag}`
+            })).object.sha;
+            const commit = (await github.rest.git.getTag({
+              tag_name: tag
+            })).object?.sha || sha;
+
+            // Poll for the macos workflow to finish on the tagged commit.
+            for (let i = 0; i < 30; i++) {
+              const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'macos.yml',
+                head_sha: commit,
+                per_page: 20
+              });
+              const done = runs.workflow_runs.find(
+                r => r.conclusion && r.status === 'completed'
+              );
+              if (done) {
+                if (done.conclusion !== 'success') {
+                  core.setFailed(
+                    `macos.yml concluded ${done.conclusion} on the tagged commit`
+                  );
+                  return;
+                }
+                return done.id;
+              }
+              await new Promise(r => setTimeout(r, 20000));
+            }
+            core.setFailed('macos.yml did not complete on the tagged commit');
+
+      - name: Download the verified package
+        uses: actions/download-artifact@v4
+        with:
+          name: Zipee-macOS-pkg
+          path: dist
+          run-id: ${{ steps.find_run.outputs.result }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Confirm the artifact is a real installer
+        run: |
+          set -euo pipefail
+          pkg="$(ls dist/*.pkg)"
+          file "$pkg"
+          # A file that is not a XAR container is not an installer, whatever
+          # it happens to be named.
+          xar -tf "$pkg" >/dev/null
+
+      - name: Fail if the checksum in SHA256SUMS.txt does not match
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          pkg="$(ls *.pkg)"
+          expected="$(awk '{print $1}' SHA256SUMS.txt)"
+          actual="$(sha256sum "$pkg" | cut -d' ' -f1)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::checksum mismatch — manifest says $expected, artifact is $actual"
+            exit 1
+          fi
+          echo "checksum verified: $actual"
+
+      - name: Build release body from the manifest
+        id: body
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          {
+            echo "## Install"
+            echo
+            echo 'This build is **unsigned**. Gatekeeper will refuse it until you allow it.'
+            echo
+            echo '```sh'
+            echo "installer -pkg $(ls *.pkg) -target /"
+            echo 'xattr -dr com.apple.quarantine /Applications/Zipee.app'
+            echo '```'
+            echo
+            echo 'Then right-click the app → Open → Open Anyway. Or build from source:'
+            echo
+            echo '```sh'
+            echo 'git clone https://github.com/desukab/zipee.git && cd zipee'
+            echo './scripts/build-macos.sh'
+            echo '```'
+            echo
+            echo '## Verify'
+            echo
+            echo 'Because this is unsigned, the checksum is the only integrity check available:'
+            echo
+            echo '```'
+            cat SHA256SUMS.txt
+            echo '```'
+            echo
+            echo '## Build manifest'
+            echo
+            echo '```'
+            cat release-manifest.txt
+            echo '```'
+            echo
+            echo '## What is not verified'
+            echo
+            echo '- The GUI has never been launched — a CI runner has no GUI session.'
+            echo '- The Swift XCTest suite is not running. See `docs/release-status.md`.'
+            echo '- Finder integration is declared but unexercised.'
+            echo '- Gatekeeper behaviour is unobserved.'
+            echo
+            echo 'Full ledger: [`docs/release-status.md`](https://github.com/desukab/zipee/blob/main/docs/release-status.md)'
+          } > release-body.md
+          {
+            echo '::add-mask::*(.pkg)'
+            echo '::add-mask::*(SHA256SUMS.txt)'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.value }}"
+          VERSION="${TAG#v}"
+
+          # Re-release is a no-op rather than a failure if the tag exists.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — updating assets"
+            gh release upload "$TAG" dist/*.pkg dist/SHA256SUMS.txt dist/release-manifest.txt --clobber
+            gh release edit "$TAG" --title "Zipee $VERSION" --notes-file dist/release-body.md
+          else
+            gh release create "$TAG" \
+              --title "Zipee $VERSION" \
+              --notes-file dist/release-body.md \
+              --target "$TAG" \
+              dist/*.pkg dist/SHA256SUMS.txt dist/release-manifest.txt
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### Released ${{ steps.tag.outputs.value }}"
+            echo
+            echo "A build from run ${{ steps.find_run.outputs.result }} passed the"
+            echo "macOS build, package, install, bundle-format and checksum gates."
+            echo
+            echo "[View release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.value }})"
+          } >> "$GITHUB_STEP_SUMMARY"
