@@ -107,7 +107,20 @@ jobs:
       - name: Download the verified package
         uses: actions/download-artifact@v4
         with:
-          name: Zipee-macOS-pkg
+          # The build is a two-runner matrix (macos-15, macos-14) with unique
+          # artifact names per leg. macos-15 is preferred: newer SDK. The
+          # fallback to macos-14 exists because FSKit needs macOS 15.4+ and
+          # the older image is the documented fallback.
+          name: Zipee-macOS-pkg-macos-15
+          path: dist
+          run-id: ${{ steps.find_run.outputs.result }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fall back to the macos-14 build if macos-15 is absent
+        if: failure()
+        uses: actions/download-artifact@v4
+        with:
+          name: Zipee-macOS-pkg-macos-14
           path: dist
           run-id: ${{ steps.find_run.outputs.result }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

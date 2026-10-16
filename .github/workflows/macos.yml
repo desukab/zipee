@@ -264,7 +264,10 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: Zipee-macOS-pkg
+          # Unique per matrix leg: macos-14 and macos-15 produce different
+          # builds (different SDKs), so they cannot share one artifact name —
+          # download-artifact@v4 rejects a name that matches multiple artifacts.
+          name: Zipee-macOS-pkg-${{ matrix.runner }}
           path: |
             dist/*.pkg
             dist/SHA256SUMS.txt
