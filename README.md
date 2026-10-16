@@ -109,17 +109,18 @@ Then in Finder: right-click → Open → Open Anyway.
 <details>
 <summary><b>Prebuilt .pkg</b></summary>
 
-Releases carry an unsigned universal `.pkg`. To install:
+Releases carry an unsigned universal `.pkg` named
+`Zipee-<version>-macOS.pkg`. Substitute the version you downloaded:
 
 ```sh
-installer -pkg Zipee-0.1.0-macOS.pkg -target /
+installer -pkg Zipee-<version>-macOS.pkg -target /
 xattr -dr com.apple.quarantine /Applications/Zipee.app
 ```
 
 Verify before you trust it:
 
 ```sh
-shasum -a 256 Zipee-0.1.0-macOS.pkg
+shasum -a 256 Zipee-<version>-macOS.pkg
 ```
 
 The published SHA-256 is in [`docs/release-status.md`](docs/release-status.md).
