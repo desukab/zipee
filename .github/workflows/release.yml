@@ -93,8 +93,13 @@ jobs:
             // Poll for macos.yml to finish on that commit. Both workflows are
             // triggered by the same tag push, so the build may not have
             // registered yet on the first pass.
+            //
+            // listWorkflowRuns (the /workflows/{id}/runs endpoint), not
+            // listWorkflowRunsForRepo: the latter has no workflow_id parameter,
+            // silently ignores it, and returns every run in the repo — which
+            // picks up the concurrent engine run instead of the macOS build.
             for (let i = 0; i < 30; i++) {
-              const runs = (await github.rest.actions.listWorkflowRunsForRepo({
+              const runs = (await github.rest.actions.listWorkflowRuns({
                 owner, repo, workflow_id: 'macos.yml',
                 head_sha: commit, per_page: 20
               })).data.workflow_runs;
