@@ -30,7 +30,12 @@ on:
         required: true
 
 permissions:
+  # Create/update the release and upload its assets.
   contents: write
+  # Required to download the Zipee-macOS-pkg artifact produced by macos.yml.
+  # Without this the download step fails with 403 even though the release
+  # itself would be permitted.
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}

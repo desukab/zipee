@@ -17,6 +17,12 @@ name: macos
 # not silently consume minutes on every push.
 
 on:
+  push:
+    # A version tag must produce the universal .pkg that release.yml attaches
+    # to the GitHub release. Without this trigger release.yml has nothing to
+    # wait for and times out.
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       notarize:
